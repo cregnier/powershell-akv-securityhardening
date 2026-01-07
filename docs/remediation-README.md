@@ -1,0 +1,157 @@
+# Azure Key Vault Policy Remediation Scripts
+
+This directory contains comprehensive remediation and policy assignment scripts for Azure Key Vault compliance.
+
+**Generated:** 2026-01-06  
+**Test Results:** AzurePolicy-KeyVault-TestReport-20260106-102723.html  
+**Compliance Frameworks:** MCSB, CIS, NIST, CERT
+
+---
+
+## Master Scripts
+
+### 1. Assign-AuditPolicies.ps1
+**Purpose:** Assign all 16 Azure Key Vault policies in Audit mode at subscription level
+
+**When to use:**
+- Initial compliance assessment
+- Understanding current compliance posture
+- Before enforcing policies
+
+**Example:**
+```powershell
+.\Assign-AuditPolicies.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb"
+
+# Preview changes
+.\Assign-AuditPolicies.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb" -WhatIf
+```
+
+**Policies assigned:** 16 (all policies in Audit mode)
+
+---
+
+### 2. Assign-DenyPolicies.ps1
+**Purpose:** Assign 14 Azure Key Vault policies in Deny mode at subscription level
+
+⚠️ **WARNING:** This actively blocks non-compliant resource creation!
+
+**When to use:**
+- After achieving compliance in Audit mode
+- Enforcing security standards organization-wide
+- Preventing future compliance drift
+
+**Example:**
+```powershell
+# Preview enforcement impact
+.\Assign-DenyPolicies.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb" -WhatIf
+
+# Assign Deny policies (requires confirmation)
+.\Assign-DenyPolicies.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb" -ConfirmEnforcement
+```
+
+**Policies assigned:** 14 (only policies supporting Deny effect)
+
+**Test validation:** All 14 policies validated on 2026-01-06 - successfully block non-compliant operations
+
+---
+
+### 3. Remediate-ComplianceIssues.ps1
+**Purpose:** Scan and remediate existing non-compliant Key Vaults
+
+**Features:**
+- Scans all Key Vaults in subscription
+- Auto-remediates safe issues (soft delete, purge protection)
+- Identifies issues requiring manual review (RBAC, firewall, expiration)
+- Exports detailed remediation script
+
+**Example:**
+```powershell
+# Scan only (no changes)
+.\Remediate-ComplianceIssues.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb"
+
+# Preview changes
+.\Remediate-ComplianceIssues.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb" -WhatIf
+
+# Auto-remediate safe issues
+.\Remediate-ComplianceIssues.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb" -AutoRemediate
+```
+
+**Compliance checks:**
+- ✅ **Auto-remediable:** Soft delete, purge protection
+- ⚠️ **Manual review:** RBAC migration, firewall, logging, secret/key expiration
+
+---
+
+## Per-Vault Remediation Scripts (Individual Components)
+
+- `enable-soft-delete.ps1` — enables soft delete (safe to run)
+- `enable-purge-protection.ps1` — enables purge protection (irreversible)
+- `enable-rbac-migration.ps1` — guidance for migrating to RBAC (manual review required)
+- `enable-diagnostics.ps1` — configures diagnostics to a Log Analytics workspace
+- `configure-firewall.ps1` — template to add IP rules or guidance for private endpoints
+
+---
+
+## Recommended Workflow
+
+### Phase 1: Assessment
+1. Run `Assign-AuditPolicies.ps1` to enable Audit mode
+2. Wait 15-30 minutes for compliance scan
+3. Review compliance dashboard
+4. Run `Remediate-ComplianceIssues.ps1` to identify issues
+
+### Phase 2: Remediation
+1. Run `Remediate-ComplianceIssues.ps1 -AutoRemediate` for safe fixes
+2. Review exported remediation script for manual items
+3. Configure RBAC, firewall, and logging per requirements
+4. Set expiration dates based on business needs
+5. Re-run compliance scan to verify
+
+### Phase 3: Enforcement
+1. Update IaC templates (Terraform, Bicep, ARM)
+2. Communicate policy enforcement to teams
+3. Run `Assign-DenyPolicies.ps1 -WhatIf` to preview impact
+4. Run `Assign-DenyPolicies.ps1 -ConfirmEnforcement` to enforce
+5. Create exemption process for special cases
+
+---
+
+## Prerequisites
+
+### Required PowerShell Modules
+```powershell
+Install-Module -Name Az.Accounts -Scope CurrentUser
+Install-Module -Name Az.Resources -Scope CurrentUser
+Install-Module -Name Az.KeyVault -Scope CurrentUser
+Install-Module -Name Az.Monitor -Scope CurrentUser
+```
+
+### Required Permissions
+- **Audit assignment:** `Policy Contributor` or higher at subscription level
+- **Deny assignment:** `Policy Contributor` or higher at subscription level
+- **Remediation:** `Key Vault Contributor` or higher on target vaults
+
+### Validated Environment
+- PowerShell 7.5+
+- Az.Accounts 5.3.0+
+- Az.Resources 8.1.0+
+- Az.KeyVault 6.3.2+
+
+---
+
+## Warnings
+
+- **Purge protection is irreversible** - confirm before running
+- **RBAC migration affects access policies** - manual verification required
+- **Always use -WhatIf first** to preview changes
+- **Test in non-production** before production deployment
+
+---
+
+## Support & Documentation
+
+- **Test Report:** `C:\Temp\AzurePolicy-KeyVault-TestReport-20260106-102723.html`
+- **Test Matrix:** `C:\Temp\AzurePolicy-KeyVault-TestMatrix.md`
+- **Master Script:** `C:\Temp\KeyVault-Remediation-Master.ps1`
+- **Azure Policy Dashboard:** https://portal.azure.com/#view/Microsoft_Azure_Policy/PolicyMenuBlade/~/Compliance
+

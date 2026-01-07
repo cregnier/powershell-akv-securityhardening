@@ -1,0 +1,75 @@
+[2026-01-05 15:26:54] [Info] === Azure Policy Key Vault Testing Framework ===
+[2026-01-05 15:26:54] [Info] Version: 1.0.0
+[2026-01-05 15:26:54] [Info] Start Time: 2026-01-05 15:26:54
+[2026-01-05 15:26:54] [Info] Step 0: Checking prerequisites...
+
+=== Checking Prerequisites ===
+Checking PowerShell version...
+  √ PowerShell 7.5.
+Checking required Azure modules...
+[33;1mVERBOSE: Populating RepositorySourceLocation property for module Az.Accounts.[0m
+  √ Az.Accounts v5.3.0
+[33;1mVERBOSE: Populating RepositorySourceLocation property for module Az.KeyVault.[0m
+  √ Az.KeyVault v6.3.2
+[33;1mVERBOSE: Populating RepositorySourceLocation property for module Az.Resources.[0m
+  √ Az.Resources v8.1.0
+[33;1mVERBOSE: Populating RepositorySourceLocation property for module Az.PolicyInsights.[0m
+  √ Az.PolicyInsights v1.7.1
+[33;1mVERBOSE: Populating RepositorySourceLocation property for module Az.Monitor.[0m
+  √ Az.Monitor v6.0.3
+[33;1mVERBOSE: Populating RepositorySourceLocation property for module Az.OperationalInsights.[0m
+  √ Az.OperationalInsights v3.3.0
+√ All prerequisites met
+True
+
+========================================
+ Available Test Scenarios (16 Tests)
+========================================
+
+Select tests to run (separate multiple with commas, e.g., 1,3,5)
+Or select by category (e.g., 1-5 for all KeyVault Configuration tests)
+
+Certificates Management:
+  [11] Certificate Validity [Audit, Deny] - Validity period limits
+  [12] Certificate CA [Audit, Deny] - Approved CAs only
+  [13] Non-Integrated CA [Audit, Deny] - External CA enforcement
+  [14] Certificate Key Type [Audit, Deny] - RSA or EC required
+  [15] Certificate Renewal [Audit, Deny] - Auto-renewal required
+
+Keys Management:
+  [7] Key Expiration [Audit, Deny] - Keys must expire
+  [8] Key Type (RSA/EC) [Audit, Deny] - Cryptographic standards
+  [9] RSA Key Size [Audit, Deny] - Minimum 2048-bit
+  [10] EC Curve Names [Audit, Deny] - Approved curves only
+
+KeyVault Configuration:
+  [1] Soft Delete [Audit, Deny] - Prevents permanent data loss
+  [2] Purge Protection [Audit, Deny] - Enforces retention period
+  [3] RBAC Authorization [Audit, Deny] - Modern access control
+  [4] Firewall and Network Access [Audit, Deny] - Network restrictions
+  [5] Private Link [Audit] - Private connectivity
+
+Logging and Monitoring:
+  [16] Diagnostic Logging [AuditIfNotExists, Audit] - Audit trail required
+
+Secrets Management:
+  [6] Secret Expiration [Audit, Deny] - Secrets must expire
+
+Selection Options:
+  Type 'all' to run all tests
+  Type specific numbers separated by commas (e.g., 1,2,5)
+  Type category number to run all tests in that category:
+    Category 1: KeyVault Configuration (tests 1-4)
+    Category 2: Secrets Management (test 5)
+    Category 3: Keys Management (tests 6-9)
+    Category 4: Certificates Management (tests 10-13)
+    Category 5: Logging and Monitoring (test 14)
+
+
+========================================
+ Test Selection
+========================================
+Would you like to:
+  [1] Run ALL 16 tests (recommended for full compliance audit)
+  [2] Select specific tests by category or number
+

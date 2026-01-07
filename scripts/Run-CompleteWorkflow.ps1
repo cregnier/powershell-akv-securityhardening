@@ -1,0 +1,1243 @@
+<#
+.SYNOPSIS
+    Complete Azure Key Vault Security Assessment Workflow with HTML+JSON output
+
+.DESCRIPTION
+    This is the master workflow script that orchestrates all steps and ensures
+    each step produces both HTML and JSON artifacts.
+    
+.PARAMETER ResourceGroupName
+    Resource group containing Key Vaults to assess (optional, defaults to subscription-wide)
+
+.PARAMETER SubscriptionId
+    Azure subscription ID (defaults to current context)
+
+.PARAMETER WorkflowRunId
+    Unique identifier for this workflow run (defaults to timestamp)
+
+.PARAMETER SkipPolicyDeployment
+    Skip deploying Azure Policy assignments (use existing)
+
+.PARAMETER AutoRemediate
+    Automatically fix safe compliance issues
+
+.EXAMPLE
+    .\Run-CompleteWorkflow.ps1 -ResourceGroupName "rg-policy-test"
+    
+.EXAMPLE
+    .\Run-CompleteWorkflow.ps1 -ResourceGroupName "rg-policy-test" -AutoRemediate
+
+.NOTES
+    This script runs all 7 steps and generates comprehensive HTML+JSON reports
+#>
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $false)]
+    [string]$ResourceGroupName,
+    
+    [Parameter(Mandatory = $false)]
+    [string]$SubscriptionId,
+    
+    [Parameter(Mandatory = $false)]
+    [string]$WorkflowRunId = (Get-Date -Format "yyyyMMdd-HHmmss"),
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipPolicyDeployment,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$AutoRemediate,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$DevTestMode,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipComplianceWait
+)
+
+# Helper function for HTML generation (defined at top for availability)
+function Generate-EnvironmentStateHtml {
+    param($StateData, $Title)
+    
+    return @"
+<!DOCTYPE html>
+<html><head><title>$Title</title><style>
+body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f5f5f5; }
+.header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+.container { max-width: 1200px; margin: 20px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+h1 { margin: 0; font-size: 2em; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }
+.summary-card { background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; }
+.summary-card .value { font-size: 2.5em; font-weight: bold; color: #667eea; }
+.summary-card .label { color: #666; margin-top: 5px; }
+.violation-details { margin-top: 20px; background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107; }
+.violation-details h3 { color: #856404; margin-bottom: 10px; font-size: 1.2em; }
+.violation-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.violation-item { background: white; padding: 10px; border-radius: 4px; }
+.violation-item .count { font-size: 1.8em; font-weight: bold; color: #dc3545; }
+.violation-item .type { font-size: 0.85em; color: #666; }
+</style></head><body>
+<div class="header"><h1>$Title</h1><p>Captured: $($StateData.CaptureDate)</p></div>
+<div class="container">
+<div class="summary">
+<div class="summary-card"><div class="value">$($StateData.Summary.TotalVaults)</div><div class="label">Total Vaults</div></div>
+<div class="summary-card"><div class="value">$($StateData.Summary.CompliantVaults)</div><div class="label">Compliant</div></div>
+<div class="summary-card"><div class="value">$($StateData.Summary.NonCompliantVaults)</div><div class="label">Non-Compliant</div></div>
+<div class="summary-card"><div class="value" style="color: #dc3545;">$(($StateData.Summary.CommonViolations.PSObject.Properties | ForEach-Object { $_.Value } | Measure-Object -Sum).Sum)</div><div class="label">Total Violations</div></div>
+</div>
+<div class="violation-details">
+<h3>⚠️ Violation Breakdown</h3>
+<div class="violation-list">
+$(
+    $violationHtml = foreach ($violation in $StateData.Summary.CommonViolations.PSObject.Properties) {
+        "<div class='violation-item'><div class='count'>$($violation.Value)</div><div class='type'>$($violation.Name -replace 'No', 'No ' -replace 'Missing', 'Missing ')</div></div>"
+    }
+    $violationHtml -join "`n"
+)
+</div>
+</div>
+<div style="margin-top: 20px; background: #e7f3ff; padding: 15px; border-radius: 8px; border-left: 4px solid #17a2b8;">
+<h3 style="color: #0c5460; margin-bottom: 10px;">📦 Objects Inventory</h3>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+<div style="background: white; padding: 10px; border-radius: 4px; text-align: center;"><strong style="color: #667eea;">$($StateData.Summary.Objects.TotalSecrets)</strong><br><span style="font-size: 0.85em; color: #666;">Secrets</span></div>
+<div style="background: white; padding: 10px; border-radius: 4px; text-align: center;"><strong style="color: #667eea;">$($StateData.Summary.Objects.TotalKeys)</strong><br><span style="font-size: 0.85em; color: #666;">Keys</span></div>
+<div style="background: white; padding: 10px; border-radius: 4px; text-align: center;"><strong style="color: #667eea;">$($StateData.Summary.Objects.TotalCertificates)</strong><br><span style="font-size: 0.85em; color: #666;">Certificates</span></div>
+</div>
+</div>
+<div style="margin-top: 20px;">
+<h3 style="color: #667eea; margin-bottom: 10px;">🏛️ Key Vaults Summary</h3>
+<table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden;">
+<thead><tr style="background: #667eea; color: white;"><th style="padding: 10px; text-align: left;">Vault Name</th><th style="padding: 10px; text-align: left;">Status</th><th style="padding: 10px; text-align: left;">Violations</th></tr></thead>
+<tbody>
+$(
+    $vaultRows = foreach ($vault in $StateData.Vaults) {
+        $status = if ($vault.IsCompliant) { "<span style='background: #d4edda; color: #155724; padding: 4px 12px; border-radius: 12px; font-size: 0.85em;'>✓ Compliant</span>" } else { "<span style='background: #f8d7da; color: #721c24; padding: 4px 12px; border-radius: 12px; font-size: 0.85em;'>⚠ Non-Compliant</span>" }
+        $violations = if ($vault.Violations.Count -gt 0) { $vault.Violations -join ', ' } else { 'None' }
+        "<tr style='border-bottom: 1px solid #ddd;'><td style='padding: 10px;'><strong>$($vault.Name)</strong></td><td style='padding: 10px;'>$status</td><td style='padding: 10px; font-size: 0.9em;'>$violations</td></tr>"
+    }
+    $vaultRows -join "`n"
+)
+</tbody>
+</table>
+</div>
+<details style="margin-top: 30px; background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea;">
+<summary style="font-size: 1.1em; font-weight: bold; color: #667eea; cursor: pointer; user-select: none;">📖 Help & Glossary</summary>
+<div style="margin-top: 15px;">
+<h4 style="color: #667eea; margin-top: 15px;">Understanding Compliance Status</h4>
+<ul style="line-height: 1.8;">
+<li><strong>Compliant</strong>: Vault meets all security requirements (soft delete, purge protection, RBAC, firewall, logging, expiration policies)</li>
+<li><strong>Non-Compliant</strong>: Vault has one or more security violations that need attention</li>
+</ul>
+<h4 style="color: #667eea; margin-top: 15px;">Common Violations Explained</h4>
+<ul style="line-height: 1.8;">
+<li><strong>No RBAC</strong>: Using legacy access policies instead of Azure RBAC (role-based access control). Recommendation: Migrate to RBAC for better security management</li>
+<li><strong>Public Access</strong>: No firewall configured, vault accepts connections from any network. Recommendation: Enable firewall with deny-all default and specific IP allowlists</li>
+<li><strong>Missing Expiration</strong>: Secrets or keys created without expiration dates. Recommendation: Set expiration dates based on business requirements (typically 30-90 days)</li>
+<li><strong>No Purge Protection</strong>: Vault can be permanently deleted immediately. Recommendation: Enable purge protection to enforce 90-day recovery period</li>
+<li><strong>No Logging</strong>: Diagnostic logging not configured. Recommendation: Enable logging to Log Analytics workspace for audit trails</li>
+</ul>
+<h4 style="color: #667eea; margin-top: 15px;">Security Features</h4>
+<ul style="line-height: 1.8;">
+<li><strong>Soft Delete</strong>: Deleted vaults retained for 90 days (enables recovery from accidental deletion)</li>
+<li><strong>Purge Protection</strong>: Prevents permanent deletion during retention period (critical for compliance)</li>
+<li><strong>RBAC Enabled</strong>: Uses Azure RBAC for access control instead of vault access policies (modern security model)</li>
+<li><strong>Firewall</strong>: Network access controls that restrict which IPs/networks can access the vault</li>
+<li><strong>Diagnostic Logging</strong>: Audit logs sent to Log Analytics for security monitoring and compliance</li>
+</ul>
+<h4 style="color: #667eea; margin-top: 15px;">Next Steps</h4>
+<ol style="line-height: 1.8;">
+<li>Review non-compliant vaults in the table above</li>
+<li>Run remediation script with <code>-AutoRemediate</code> for safe auto-fixes (soft delete, purge protection)</li>
+<li>Use <code>-DevTestMode</code> for test environments to auto-fix all issues (includes breaking changes)</li>
+<li>For production: Manually review and apply firewall, RBAC, and expiration policies based on business requirements</li>
+<li>Re-run documentation script after remediation to verify improvements</li>
+</ol>
+</div>
+</details>
+<p style="margin-top: 20px;"><strong>Note:</strong> See JSON file for detailed vault information and compliance data.</p>
+</div></body></html>
+"@
+}
+
+$ErrorActionPreference = "Continue"
+
+# Set subscription context
+if (-not $SubscriptionId) {
+    $SubscriptionId = (Get-AzContext).Subscription.Id
+}
+
+Write-Host "`n╔════════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║                                                                ║" -ForegroundColor Cyan
+Write-Host "║      Azure Key Vault Security Assessment Workflow             ║" -ForegroundColor Cyan
+Write-Host "║                                                                ║" -ForegroundColor Cyan
+Write-Host "╚════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Workflow Run ID: $WorkflowRunId" -ForegroundColor Yellow
+Write-Host "Subscription: $SubscriptionId" -ForegroundColor Yellow
+if ($ResourceGroupName) {
+    Write-Host "Resource Group: $ResourceGroupName" -ForegroundColor Yellow
+} else {
+    Write-Host "Scope: Subscription-wide" -ForegroundColor Yellow
+}
+Write-Host ""
+
+$workflowStart = Get-Date
+$artifacts = @()
+
+# Ensure centralized artifacts directories exist (json, html, csv)
+$artifactRoot = Join-Path $PSScriptRoot '..\artifacts'
+$jsonDir = Join-Path $artifactRoot 'json'
+$htmlDir = Join-Path $artifactRoot 'html'
+$csvDir = Join-Path $artifactRoot 'csv'
+foreach ($d in @($artifactRoot, $jsonDir, $htmlDir, $csvDir)) {
+    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+}
+
+# ============================================
+# STEP 1: Capture Baseline Environment State
+# ============================================
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+Write-Host "STEP 1: Capturing Baseline Environment State" -ForegroundColor Cyan
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+
+$baselineJson = Join-Path $jsonDir "baseline-$WorkflowRunId.json"
+$baselineHtml = Join-Path $htmlDir "baseline-$WorkflowRunId.html"
+
+try {
+    if ($ResourceGroupName) {
+        & "$PSScriptRoot\Document-PolicyEnvironmentState.ps1" -ResourceGroupName $ResourceGroupName -OutputPath $baselineJson -IncludeCompliance
+    } else {
+        Write-Host "Scanning all resource groups..." -ForegroundColor Gray
+        & "$PSScriptRoot\Document-PolicyEnvironmentState.ps1" -OutputPath $baselineJson -IncludeCompliance
+    }
+    
+    # Generate HTML from JSON
+    $baseline = Get-Content $baselineJson | ConvertFrom-Json
+    $baselineHtmlContent = Generate-EnvironmentStateHtml -StateData $baseline -Title "Baseline Environment State"
+    $baselineHtmlContent | Out-File $baselineHtml -Encoding UTF8
+    
+    $artifacts += @{ step = 1; name = "Baseline State"; json = $baselineJson; html = $baselineHtml }
+    Write-Host "✓ Step 1 Complete: $baselineJson, $baselineHtml" -ForegroundColor Green
+} catch {
+    Write-Host "✗ Step 1 Failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# ============================================
+# STEP 2: Deploy Audit Policies
+# ============================================
+if (-not $SkipPolicyDeployment) {
+    Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    Write-Host "STEP 2: Deploying Audit Policies" -ForegroundColor Cyan
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    
+    $policyJson = Join-Path $jsonDir "policy-assignments-$WorkflowRunId.json"
+    $policyHtml = Join-Path $htmlDir "policy-assignments-$WorkflowRunId.html"
+    
+    try {
+        # Run policy assignment and capture output
+        if ($ResourceGroupName) {
+            Write-Host "  Assigning policies to resource group: $ResourceGroupName" -ForegroundColor Gray
+            $policyOutput = & "$PSScriptRoot\Assign-AuditPolicies.ps1" -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName 6>&1
+        } else {
+            Write-Host "  Assigning policies to entire subscription" -ForegroundColor Gray
+            $policyOutput = & "$PSScriptRoot\Assign-AuditPolicies.ps1" -SubscriptionId $SubscriptionId 6>&1
+        }
+        
+        # Create JSON artifact
+        $policyData = @{
+            timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+            subscriptionId = $SubscriptionId
+            mode = "Audit"
+            scope = "/subscriptions/$SubscriptionId"
+            policiesDeployed = @(
+                @{ name = "Soft Delete"; id = "fec47c25-8e18-4c38-a21d-ad5cb9b2da8c" },
+                @{ name = "Purge Protection"; id = "0b60c0b2-2dc2-4e1c-b5c9-abbed971de53" },
+                @{ name = "RBAC Authorization"; id = "12d4fa5e-1f9f-4c21-97a9-b99b3c6611b5" },
+                @{ name = "Firewall Enabled"; id = "55615ac9-af46-4a59-874e-391cc3dfb490" },
+                @{ name = "Secret Expiration"; id = "98728c90-32c7-4049-8429-847dc0f4fe37" },
+                @{ name = "Key Expiration"; id = "152b15f7-8e1f-4c1f-ab71-8c010ba5dbc0" },
+                @{ name = "Key Type"; id = "1151cede-290b-4ba0-8b38-0ad145ac888f" },
+                @{ name = "RSA Key Size"; id = "82067dbb-e53b-4e06-b631-546d197452d9" },
+                @{ name = "EC Curve Names"; id = "ff25f3c8-b739-4538-9d07-3d6d25cfb255" },
+                @{ name = "Certificate Validity"; id = "0a075868-cc6b-4bdb-9e94-2f8454cc4cf0" },
+                @{ name = "Integrated CA"; id = "8e826246-c976-48f6-b03e-619bb92b3d82" },
+                @{ name = "Non-Integrated CA"; id = "a22f4a40-01d3-4c7d-8071-da157eef56dc" },
+                @{ name = "Certificate Key Type"; id = "1151cede-290b-4ba0-8b38-0ad145ac888f" },
+                @{ name = "Certificate Renewal"; id = "884ac1a6-4cc8-4ac7-8e1b-0c0a84e3bfc3" },
+                @{ name = "Diagnostic Logging"; id = "cf820ca0-f99e-4f3e-84c5-b82bae2f6d5e" },
+                @{ name = "Private Link"; id = "a6abeaec-bd56-4dab-9f5e-1d84e48a9e96" }
+            )
+            output = $policyOutput | Out-String
+        }
+        $policyData | ConvertTo-Json -Depth 10 | Out-File $policyJson -Encoding UTF8
+        
+        # Generate HTML
+        $policyHtmlContent = @"
+<!DOCTYPE html>
+<html><head><title>Policy Assignments - $WorkflowRunId</title><style>
+body { font-family: 'Segoe UI', sans-serif; margin: 20px; background: #f5f5f5; }
+.container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+h1 { color: #667eea; border-bottom: 3px solid #667eea; padding-bottom: 10px; }
+table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+th { background: #667eea; color: white; padding: 12px; text-align: left; }
+td { padding: 10px; border-bottom: 1px solid #ddd; }
+tr:hover { background: #f8f9fa; }
+.badge { padding: 4px 12px; border-radius: 12px; font-size: 0.9em; background: #d4edda; color: #155724; }
+</style></head><body><div class="container">
+<h1>Azure Policy Assignments - Audit Mode</h1>
+<p><strong>Timestamp:</strong> $($policyData.timestamp)</p>
+<p><strong>Subscription:</strong> $SubscriptionId</p>
+<p><strong>Mode:</strong> <span class="badge">Audit (Non-Blocking)</span></p>
+
+<details style='margin: 20px 0; background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea;'>
+<summary style='cursor: pointer; font-size: 1.2em; font-weight: bold; color: #667eea; margin-bottom: 15px;'>📖 Azure Policy Guide - Click to Expand</summary>
+<div style='margin-top: 15px; line-height: 1.8;'>
+<h3 style='color: #667eea; margin-bottom: 10px;'>🎯 What is Azure Policy?</h3>
+<p>Azure Policy is a governance service that evaluates Azure resources against business rules (policies). Policies can audit compliance (reporting only) or enforce compliance (prevent non-compliant resources).</p>
+
+<h3 style='color: #667eea; margin: 20px 0 10px 0;'>📋 Policy Modes</h3>
+<table style='margin-bottom: 20px; width: 100%;'>
+<tr style='background: #e7f3ff;'><td style='padding: 8px;'><strong>Audit Mode (Current)</strong></td><td style='padding: 8px;'>Detects non-compliance and reports violations without blocking resources. Safe for production.</td></tr>
+<tr><td style='padding: 8px;'><strong>Deny Mode</strong></td><td style='padding: 8px;'>Prevents creation/modification of non-compliant resources. Use after testing.</td></tr>
+<tr style='background: #e7f3ff;'><td style='padding: 8px;'><strong>DeployIfNotExists</strong></td><td style='padding: 8px;'>Automatically deploys resources (e.g., diagnostic settings) if missing.</td></tr>
+</table>
+
+<h3 style='color: #667eea; margin: 20px 0 10px 0;'>🔒 Policy Coverage Layers</h3>
+<ul>
+<li><strong>Service-Level:</strong> Azure Key Vault service settings (soft delete, purge protection, RBAC)</li>
+<li><strong>Vault-Level:</strong> Individual vault configurations (firewall, logging, private link)</li>
+<li><strong>Object-Level:</strong> Secrets, keys, and certificates (expiration, key types, curve names)</li>
+</ul>
+
+<h3 style='color: #667eea; margin: 20px 0 10px 0;'>📚 Compliance Frameworks</h3>
+<p style='background: #e7f3ff; padding: 15px; border-radius: 4px; border-left: 4px solid #17a2b8;'>
+<strong>MCSB:</strong> Microsoft Cloud Security Benchmark (Azure security baseline)<br>
+<strong>CIS:</strong> Center for Internet Security Azure Foundations Benchmark v2.0<br>
+<strong>NIST:</strong> National Institute of Standards and Technology SP 800-53 rev 5<br>
+<strong>CERT:</strong> CERT Secure Coding Standards for cryptography
+</p>
+
+<h3 style='color: #667eea; margin: 20px 0 10px 0;'>⏱️ Policy Evaluation Timeline</h3>
+<table style='margin-bottom: 20px; width: 100%;'>
+<tr><td style='padding: 8px;'><strong>Initial Assignment:</strong></td><td style='padding: 8px;'>15-30 minutes for first compliance scan</td></tr>
+<tr style='background: #e7f3ff;'><td style='padding: 8px;'><strong>New Resources:</strong></td><td style='padding: 8px;'>Evaluated immediately on creation/modification</td></tr>
+<tr><td style='padding: 8px;'><strong>Existing Resources:</strong></td><td style='padding: 8px;'>Re-scanned every 24 hours</td></tr>
+<tr style='background: #e7f3ff;'><td style='padding: 8px;'><strong>Manual Trigger:</strong></td><td style='padding: 8px;'>Use <code>Start-AzPolicyComplianceScan</code></td></tr>
+</table>
+
+<h3 style='color: #667eea; margin: 20px 0 10px 0;'>💡 Best Practices</h3>
+<ul>
+<li>Always test policies in Audit mode before switching to Deny mode</li>
+<li>Assign policies at subscription or management group level for consistent governance</li>
+<li>Use policy initiatives (bundles) for related policies</li>
+<li>Monitor compliance in Azure Portal: Policy → Compliance dashboard</li>
+<li>Create exclusions for specific resources if needed (resource groups, individual vaults)</li>
+</ul>
+</div>
+</details>
+
+<h2>Deployed Policies ($($policyData.policiesDeployed.Count))</h2>
+<table><thead><tr><th>Policy Name</th><th>Description</th><th>Policy ID</th></tr></thead><tbody>
+"@
+        
+        # Policy descriptions mapping
+        $policyDescriptions = @{
+            "Soft Delete" = "Ensures Key Vaults have soft delete enabled (90-day retention)"
+            "Purge Protection" = "Prevents permanent deletion of secrets during retention period"
+            "RBAC Authorization" = "Requires Azure RBAC instead of legacy access policies"
+            "Firewall Enabled" = "Restricts network access with firewall rules"
+            "Secret Expiration" = "Requires all secrets to have expiration dates"
+            "Key Expiration" = "Requires all keys to have expiration dates"
+            "Key Type" = "Validates cryptographic key types (RSA/EC)"
+            "RSA Key Size" = "Enforces minimum RSA key size (2048+ bits)"
+            "EC Curve Names" = "Validates elliptic curve names"
+            "Certificate Validity" = "Enforces maximum certificate validity period"
+            "Integrated CA" = "Requires certificates from integrated CAs"
+            "Non-Integrated CA" = "Controls non-integrated CA usage"
+            "Certificate Key Type" = "Validates certificate key types"
+            "Certificate Renewal" = "Ensures timely certificate renewal"
+            "Diagnostic Logging" = "Requires diagnostic logs sent to Log Analytics"
+            "Private Link" = "Enforces private endpoint connections"
+        }
+        
+        foreach ($policy in $policyData.policiesDeployed) {
+            $description = $policyDescriptions[$policy.name]
+            if (-not $description) { $description = "Azure Key Vault security policy" }
+            $policyHtmlContent += "<tr><td><strong>$($policy.name)</strong></td><td>$description</td><td><code>$($policy.id)</code></td></tr>`n"
+        }
+        $policyHtmlContent += "</tbody></table></div></body></html>"
+        $policyHtmlContent | Out-File $policyHtml -Encoding UTF8
+        
+        $artifacts += @{ step = 2; name = "Policy Assignments"; json = $policyJson; html = $policyHtml }
+        Write-Host "✓ Step 2 Complete: $policyJson, $policyHtml" -ForegroundColor Green
+    } catch {
+        Write-Host "✗ Step 2 Failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# ============================================
+# STEP 3: Wait for Compliance Scan
+# ============================================
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+Write-Host "STEP 3: Waiting for Azure Policy Compliance Scan" -ForegroundColor Cyan
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+
+Write-Host "Checking for compliance data..." -ForegroundColor Gray
+$complianceAvailable = $false
+for ($i = 0; $i -lt 3; $i++) {
+    $testData = Get-AzPolicyState -SubscriptionId $SubscriptionId -Filter "ResourceType eq 'Microsoft.KeyVault/vaults'" -ErrorAction SilentlyContinue
+    if ($testData) {
+        $complianceAvailable = $true
+        Write-Host "✓ Compliance data available!" -ForegroundColor Green
+        break
+    }
+    Write-Host "  Attempt $($i + 1)/3: No data yet, waiting 10 seconds..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 10
+}
+
+if (-not $complianceAvailable) {
+    Write-Host "⏳ Compliance scan still in progress. This is normal for new deployments." -ForegroundColor Yellow
+    Write-Host "   Typically takes 15-30 minutes. You can continue and check later." -ForegroundColor Gray
+}
+
+# ============================================
+# STEP 4: Generate Compliance Report
+# ============================================
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+Write-Host "STEP 4: Generating Compliance Report" -ForegroundColor Cyan
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+
+$complianceJson = Join-Path $jsonDir "compliance-report-$WorkflowRunId.json"
+$complianceHtml = Join-Path $htmlDir "compliance-report-$WorkflowRunId.html"
+$complianceCsv = Join-Path $csvDir "compliance-report-$WorkflowRunId.csv"
+
+try {
+    # Filter compliance data by resource group if specified
+    $allComplianceData = Get-AzPolicyState -SubscriptionId $SubscriptionId -Filter "ResourceType eq 'Microsoft.KeyVault/vaults'" -ErrorAction SilentlyContinue
+    
+    if ($allComplianceData) {
+        Write-Host "  Retrieved $($allComplianceData.Count) total Key Vault policy evaluations" -ForegroundColor Gray
+        
+        if ($ResourceGroupName) {
+            Write-Host "  Filtering for resource group: $ResourceGroupName" -ForegroundColor Gray
+            $complianceData = $allComplianceData | Where-Object { $_.ResourceId -like "*/resourcegroups/$ResourceGroupName/*" }
+            Write-Host "  After filtering: $($complianceData.Count) evaluations in target resource group" -ForegroundColor Gray
+            
+            # Debug: Show sample ResourceId if filtered count is 0
+            if ($complianceData.Count -eq 0 -and $allComplianceData.Count -gt 0) {
+                $sampleId = $allComplianceData[0].ResourceId
+                Write-Host "  ⚠ Note: Sample ResourceId format: $sampleId" -ForegroundColor Yellow
+                Write-Host "  ⚠ Looking for pattern: */resourcegroups/$ResourceGroupName/*" -ForegroundColor Yellow
+            }
+        } else {
+            $complianceData = $allComplianceData
+        }
+    } else {
+        Write-Host "  ⚠ No compliance data retrieved from Azure Policy" -ForegroundColor Yellow
+        $complianceData = @()
+    }
+    
+    # Always generate the report (even if empty)
+    if ($complianceData -and $complianceData.Count -gt 0) {
+        # Export CSV
+        $complianceData | Select-Object ResourceId, PolicyDefinitionName, PolicyDefinitionAction, ComplianceState, Timestamp |
+            Export-Csv $complianceCsv -NoTypeInformation
+        
+        # Create policy name mapping for friendly display
+        $policyNameMap = @{
+            '0b60c0b2-2dc2-4e1c-b5c9-abbed971de53' = 'Key Vault Soft Delete'
+            'a400a00b-2de8-46d3-a5a3-72631a0e0e92' = 'Key Vault Purge Protection'
+            '12d4fa5e-1f9f-4c21-97a9-b99b3c6611b5' = 'Key Vault RBAC Authorization'
+            '55615ac9-af46-4a59-874e-391cc3dfb490' = 'Key Vault Network Firewall'
+            '1e66c121-a66a-4b1f-9b83-0fd99bf0fc2d' = 'Key Vault Private Link'
+            '98728c90-32c7-4049-8429-847dc0f4fe37' = 'Key Vault Secrets Expiration'
+            '152b15f7-8e1f-4c1f-ab71-8c010ba5dbc0' = 'Key Vault Keys Expiration'
+            '75c4f823-d65a-4f59-a679-427d20e9ba0d' = 'Key Vault Allowed Key Types'
+            '82067dbb-e53b-4e06-b631-546d197452d9' = 'Key Vault RSA Key Minimum Size'
+            'ff25f3c8-b739-4538-9d07-3d6d25cfb255' = 'Key Vault EC Key Minimum Curve'
+            '0aa6d03c-b052-4f49-9992-64c697e7d88b' = 'Key Vault Certificate Validity Period'
+            'a22f4a40-01d3-4c7d-8071-da157eeff341' = 'Key Vault Certificate Approved CAs'
+            '11c30ece-f97b-45b9-9e84-1c43c2e88e19' = 'Key Vault Certificate EC Curve'
+            '1151cede-290b-4ba0-8b38-0ad145ac888f' = 'Key Vault Certificate Key Type'
+            '7d39b5a6-aff5-44e3-a5d5-9e72e5b7f1da' = 'Key Vault Certificate Renewal'
+            'cf820ca0-f99e-4f3e-84c5-e5e0541c9db8' = 'Key Vault Diagnostic Logging'
+        }
+        
+        # Create JSON
+        $complianceReport = @{
+            timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+            subscriptionId = $SubscriptionId
+            totalEvaluations = $complianceData.Count
+            compliant = ($complianceData | Where-Object ComplianceState -eq 'Compliant').Count
+            nonCompliant = ($complianceData | Where-Object ComplianceState -eq 'NonCompliant').Count
+            policies = $complianceData | Group-Object PolicyDefinitionName | ForEach-Object {
+                $policyGuid = $_.Name -replace '.*/','
+
+'
+                $friendlyName = if ($policyNameMap.ContainsKey($policyGuid)) { $policyNameMap[$policyGuid] } else { $policyGuid }
+                @{
+                    policyName = $_.Name
+                    policyGuid = $policyGuid
+                    friendlyName = $friendlyName
+                    compliant = ($_.Group | Where-Object ComplianceState -eq 'Compliant').Count
+                    nonCompliant = ($_.Group | Where-Object ComplianceState -eq 'NonCompliant').Count
+                }
+            }
+            details = $complianceData | Select-Object ResourceId, PolicyDefinitionName, ComplianceState, Timestamp
+        }
+        $complianceReport | ConvertTo-Json -Depth 10 | Out-File $complianceJson -Encoding UTF8
+        
+        # Generate HTML with full legend
+        $complianceHtmlContent = @"
+<!DOCTYPE html>
+<html><head><title>Compliance Report - $WorkflowRunId</title><style>
+body { font-family: 'Segoe UI', sans-serif; margin: 20px; background: #f5f5f5; }
+.container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+h1, h2 { color: #667eea; border-bottom: 3px solid #667eea; padding-bottom: 10px; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }
+.card { background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; }
+.card .value { font-size: 2.5em; font-weight: bold; color: #667eea; }
+.card .label { color: #666; margin-top: 5px; }
+.card.success { border-left: 4px solid #28a745; }
+.card.danger { border-left: 4px solid #dc3545; }
+table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+th { background: #667eea; color: white; padding: 12px; text-align: left; }
+td { padding: 10px; border-bottom: 1px solid #ddd; }
+tr:hover { background: #f8f9fa; }
+.badge-compliant { background: #d4edda; color: #155724; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; }
+.badge-noncompliant { background: #f8d7da; color: #721c24; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; }
+.timing-banner { background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 6px solid #ffc107; }
+.timing-banner h3 { color: #856404; margin: 0 0 10px 0; font-size: 1.1em; }
+.timing-banner p { color: #856404; margin: 5px 0; line-height: 1.6; }
+.guid-text { font-size: 0.75em; color: #999; font-family: monospace; margin-left: 8px; }
+</style></head><body><div class="container">
+<h1>Azure Policy Compliance Report</h1>
+<p><strong>Timestamp:</strong> $($complianceReport.timestamp)</p>
+<p><strong>Subscription:</strong> $SubscriptionId</p>
+
+<div class='timing-banner'>
+<h3>📅 Report Timing: BEFORE Remediation</h3>
+<p><strong>What this report shows:</strong> This compliance report captures the state of your Key Vaults immediately AFTER policy assignments but BEFORE any remediation actions.</p>
+<p><strong>Why it matters:</strong> NonCompliant items shown here represent violations that existed in your environment before fixes were applied. After running remediation, generate a new compliance report to see improvements.</p>
+<p><strong>Next steps:</strong> Review NonCompliant items below, then check the Remediation Report to see which issues were auto-fixed and which require manual intervention.</p>
+</div>
+
+<details style='margin: 20px 0; background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea;'>
+<summary style='cursor: pointer; font-size: 1.2em; font-weight: bold; color: #667eea; margin-bottom: 15px;'>📖 Compliance Report Guide - Click to Expand</summary>
+<div style='margin-top: 15px; line-height: 1.8;'>
+<h3 style='color: #667eea; margin-bottom: 10px;'>📊 Understanding Compliance States</h3>
+<table style='margin-bottom: 20px; width: 100%;'>
+<tr style='background: #d4edda;'><td style='padding: 8px;'><strong>Compliant</strong></td><td style='padding: 8px;'>Resource meets policy requirements - no action needed</td></tr>
+<tr><td style='padding: 8px;'><strong>NonCompliant</strong></td><td style='padding: 8px;'>Resource violates policy - remediation required</td></tr>
+<tr style='background: #fff3cd;'><td style='padding: 8px;'><strong>Conflict</strong></td><td style='padding: 8px;'>Multiple policies with conflicting requirements</td></tr>
+<tr><td style='padding: 8px;'><strong>Exempt</strong></td><td style='padding: 8px;'>Resource explicitly excluded from policy evaluation</td></tr>
+</table>
+
+<h3 style='color: #667eea; margin: 20px 0 10px 0;'>🔍 How to Read This Report</h3>
+<p><strong>Summary Cards:</strong> High-level view of total policy evaluations, compliant vs non-compliant resources</p>
+<p><strong>Policy-Level Breakdown:</strong> Shows compliance per policy definition (e.g., "Soft Delete Policy" evaluated 5 vaults, 3 compliant, 2 non-compliant)</p>
+<p><strong>Resource-Level Details:</strong> Individual vault compliance state for each policy (resource-policy pair)</p>
+
+<h3 style='color: #667eea; margin: 20px 0 10px 0;'>📈 Compliance Calculation</h3>
+<p style='background: #e7f3ff; padding: 15px; border-radius: 4px; border-left: 4px solid #17a2b8;'>
+<strong>Total Evaluations:</strong> Number of resource-policy pairs (e.g., 5 vaults × 16 policies = 80 evaluations)<br>
+<strong>Compliant Count:</strong> How many evaluations passed<br>
+<strong>NonCompliant Count:</strong> How many evaluations failed<br>
+<strong>Compliance %:</strong> (Compliant / Total) × 100
+</p>
+
+<h3 style='color: #667eea; margin: 20px 0 10px 0;'>⚙️ Common Actions</h3>
+<ul>
+<li><strong>Review NonCompliant items:</strong> Identify which vaults violate which policies</li>
+<li><strong>Run Remediation:</strong> Use remediation script to auto-fix safe issues</li>
+<li><strong>Manual Review:</strong> For complex issues (RBAC, firewall), plan manual remediation</li>
+<li><strong>Monitor Trends:</strong> Compare reports over time to track improvement</li>
+<li><strong>Create Exemptions:</strong> If specific vaults have valid business reasons for non-compliance</li>
+</ul>
+
+<h3 style='color: #667eea; margin: 20px 0 10px 0;'>⏱️ Data Freshness</h3>
+<p style='background: #fff3cd; padding: 15px; border-radius: 4px; border-left: 4px solid #ffc107;'>
+<strong>Note:</strong> Compliance data may be 15-30 minutes old. After remediation, wait 15-30 minutes and re-run compliance scan for updated results. Use <code>Start-AzPolicyComplianceScan</code> to trigger immediate re-evaluation (takes 5-10 minutes).
+</p>
+</div>
+</details>
+
+<div class="summary">
+<div class="card"><div class="value">$($complianceReport.totalEvaluations)</div><div class="label">Total Evaluations</div></div>
+<div class="card success"><div class="value" style="color:#28a745;">$($complianceReport.compliant)</div><div class="label">Compliant</div></div>
+<div class="card danger"><div class="value" style="color:#dc3545;">$($complianceReport.nonCompliant)</div><div class="label">Non-Compliant</div></div>
+<div class="card"><div class="value">$(if ($complianceReport.totalEvaluations -gt 0) { [math]::Round(($complianceReport.compliant / $complianceReport.totalEvaluations) * 100, 1) } else { 0 })%</div><div class="label">Compliance Rate</div></div>
+</div>
+
+<h2>Policy-Level Breakdown</h2>
+<table><thead><tr><th>Policy Name</th><th>Compliant</th><th>Non-Compliant</th><th>Compliance %</th></tr></thead><tbody>
+$(
+    $policyRows = foreach ($policy in $complianceReport.policies) {
+        $total = $policy.compliant + $policy.nonCompliant
+        $compliancePercent = if ($total -gt 0) { [math]::Round(($policy.compliant / $total) * 100, 1) } else { 0 }
+        $friendlyName = if ($policy.friendlyName) { $policy.friendlyName } else { $policy.policyName -replace '.*/', '' }
+        $guidShort = ($policy.policyGuid -replace '-.*').Substring(0, [Math]::Min(8, ($policy.policyGuid -replace '-.*').Length))
+        $policyDisplay = "$friendlyName<span class='guid-text'>($guidShort...)</span>"
+        "<tr><td>$policyDisplay</td><td style='color:#28a745;'>$($policy.compliant)</td><td style='color:#dc3545;'>$($policy.nonCompliant)</td><td>$compliancePercent%</td></tr>"
+    }
+    $policyRows -join "`n"
+)
+</tbody></table>
+
+<h2>Resource-Level Details</h2>
+<p style='color:#666; font-size:0.9em; margin-bottom:15px;'>Showing all vault-policy evaluation pairs ($($complianceReport.details.Count) total evaluations)</p>
+<table><thead><tr><th>Vault Name</th><th>Policy</th><th>Compliance State</th><th>Timestamp</th></tr></thead><tbody>
+$(
+    $detailRows = foreach ($item in $complianceReport.details) {
+        $vaultName = $item.ResourceId -replace '.*/', ''
+        $policyGuid = $item.PolicyDefinitionName -replace '.*/', ''
+        $friendlyPolicyName = if ($policyNameMap.ContainsKey($policyGuid)) { $policyNameMap[$policyGuid] } else { $policyGuid -replace '-', ' ' }
+        $guidShort = ($policyGuid -replace '-.*').Substring(0, [Math]::Min(8, ($policyGuid -replace '-.*').Length))
+        $badge = if ($item.ComplianceState -eq 'Compliant') { "<span class='badge-compliant'>✓ Compliant</span>" } else { "<span class='badge-noncompliant'>⚠ $($item.ComplianceState)</span>" }
+        $timestamp = if ($item.Timestamp) { $item.Timestamp.ToString('yyyy-MM-dd HH:mm') } else { 'N/A' }
+        "<tr><td><strong>$vaultName</strong></td><td style='font-size:0.9em;'>$friendlyPolicyName <span class='guid-text'>($guidShort...)</span></td><td>$badge</td><td style='font-size:0.85em; color:#666;'>$timestamp</td></tr>"
+    }
+    $detailRows -join "`n"
+)
+</tbody></table>
+</div></body></html>
+"@
+        $complianceHtmlContent | Out-File $complianceHtml -Encoding UTF8
+        
+        $artifacts += @{ step = 4; name = "Compliance Report"; json = $complianceJson; csv = $complianceCsv; html = $complianceHtml }
+        Write-Host "✓ Step 4 Complete: $complianceJson, $complianceCsv, $complianceHtml" -ForegroundColor Green
+    } else {
+        # Generate placeholder report explaining the delay
+        Write-Host "⏳ No compliance data available yet - generating placeholder report" -ForegroundColor Yellow
+        
+        $placeholderHtml = @"
+<!DOCTYPE html>
+<html><head><title>Compliance Report - Pending</title><style>
+body { font-family: 'Segoe UI', sans-serif; margin: 20px; background: #f5f5f5; }
+.container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+h1 { color: #667eea; border-bottom: 3px solid #667eea; padding-bottom: 10px; }
+.warning { background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 20px; margin: 20px 0; }
+.warning h2 { color: #856404; margin-top: 0; }
+.info { background: #e7f3ff; padding: 15px; border-radius: 4px; border-left: 4px solid #17a2b8; margin: 20px 0; }
+ul { line-height: 1.8; }
+</style></head><body><div class="container">
+<h1>⏳ Azure Policy Compliance Report - Data Pending</h1>
+<p><strong>Timestamp:</strong> $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")</p>
+<p><strong>Subscription:</strong> $SubscriptionId</p>
+$(if ($ResourceGroupName) { "<p><strong>Resource Group:</strong> $ResourceGroupName</p>" } else { "" })
+
+<div class="warning">
+<h2>⚠️ No Compliance Data Available Yet</h2>
+<p><strong>Reason:</strong> Azure Policy compliance evaluations are still in progress or haven't completed for the vaults in this resource group.</p>
+</div>
+
+<div class="info">
+<h3>Why Is This Happening?</h3>
+<ul>
+<li><strong>Policy Assignment Timing:</strong> Policies were just assigned - Azure needs 15-30 minutes to evaluate all resources</li>
+<li><strong>Recent Remediation:</strong> Vaults were just remediated - Azure needs time to re-evaluate compliance state</li>
+<li><strong>Resource Group Filter:</strong> Compliance data exists for other vaults but not yet for: <code>$ResourceGroupName</code></li>
+</ul>
+
+<h3>📊 What We Found</h3>
+<p>Total Key Vault policy evaluations in subscription: <strong>$($allComplianceData.Count)</strong></p>
+$(if ($ResourceGroupName -and $allComplianceData.Count -gt 0) {
+    "<p>Evaluations matching resource group '$ResourceGroupName': <strong>0</strong></p>
+    <p style='color: #856404;'>💡 The evaluations might be for vaults in other resource groups or the compliance scan hasn't completed yet for your vaults.</p>"
+} else { "" })
+
+<h3>⏱️ Next Steps</h3>
+<ol>
+<li><strong>Wait 15-30 minutes</strong> for Azure Policy to complete evaluation</li>
+<li><strong>Trigger manual scan:</strong> Run <code>Start-AzPolicyComplianceScan -ResourceGroupName $ResourceGroupName</code></li>
+<li><strong>Re-run workflow:</strong> Execute the workflow again to regenerate this report with fresh data</li>
+<li><strong>Check Azure Portal:</strong> Navigate to Policy → Compliance to see evaluation status</li>
+</ol>
+</div>
+
+<p style="margin-top: 30px; color: #666;">
+<strong>Note:</strong> This is a placeholder report. Once compliance data is available, re-run the workflow to get the full compliance analysis.
+</p>
+</div></body></html>
+"@
+        $placeholderHtml | Out-File $complianceHtml -Encoding UTF8
+        
+        # Create minimal JSON
+        $emptyReport = @{
+            timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+            subscriptionId = $SubscriptionId
+            resourceGroup = $ResourceGroupName
+            status = "NoDataAvailable"
+            totalEvaluationsInSubscription = if ($allComplianceData) { $allComplianceData.Count } else { 0 }
+            message = "Compliance data not yet available. Azure Policy evaluation in progress."
+        }
+        $emptyReport | ConvertTo-Json -Depth 5 | Out-File $complianceJson -Encoding UTF8
+        
+        $artifacts += @{ step = 4; name = "Compliance Report (Pending)"; json = $complianceJson; html = $complianceHtml }
+        Write-Host "✓ Step 4 Complete (placeholder): $complianceJson, $complianceHtml" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "✗ Step 4 Failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# ============================================
+# STEP 5: Remediation (preview or auto-remediate)
+# ============================================
+Write-Host "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+Write-Host "STEP 5: Remediation (scan and auto-fix)" -ForegroundColor Cyan
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+
+try {
+    $remediateStart = Get-Date
+    $remediationJson = Join-Path $jsonDir "remediation-result-$WorkflowRunId.json"
+    $remediationHtml = Join-Path $htmlDir "remediation-result-$WorkflowRunId.html"
+
+    if ($DevTestMode) {
+        Write-Host "Running remediation with -DevTestMode (full auto-fix)..." -ForegroundColor Magenta
+        $remediateOutput = & "$PSScriptRoot\Remediate-ComplianceIssues.ps1" -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName -DevTestMode *>&1 | Out-String
+    } elseif ($AutoRemediate) {
+        Write-Host "Running remediation with -AutoRemediate (safe fixes only)..." -ForegroundColor Cyan
+        $remediateOutput = & "$PSScriptRoot\Remediate-ComplianceIssues.ps1" -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName -AutoRemediate *>&1 | Out-String
+    } else {
+        Write-Host "Running remediation in scan-only preview mode (no changes)." -ForegroundColor Yellow
+        $remediateOutput = & "$PSScriptRoot\Remediate-ComplianceIssues.ps1" -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName -ScanOnly *>&1 | Out-String
+    }
+
+    # Save remediation output as JSON artifact (simple wrapper)
+    $remediationRecord = @{
+        timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        subscriptionId = $SubscriptionId
+        resourceGroup = $ResourceGroupName
+        autoRemediate = [bool]$AutoRemediate
+        output = $remediateOutput
+    }
+    $remediationRecord | ConvertTo-Json -Depth 5 | Out-File $remediationJson -Encoding UTF8
+
+    # Save a structured HTML view for easy browsing
+    # Parse key stats from the output
+    $vaultsScanned = if ($remediateOutput -match 'Vaults scanned: (\d+)') { $matches[1] } else { 0 }
+    $totalIssues = if ($remediateOutput -match 'Total issues found: (\d+)') { $matches[1] } else { 0 }
+    $issuesFixed = if ($remediateOutput -match 'Issues auto-remediated: (\d+)') { $matches[1] } else { 0 }
+    $manualReview = if ($remediateOutput -match 'Manual review required: (\d+)') { $matches[1] } else { 0 }
+    $highIssues = if ($remediateOutput -match '  High: (\d+)') { $matches[1] } else { 0 }
+    $mediumIssues = if ($remediateOutput -match '  Medium: (\d+)') { $matches[1] } else { 0 }
+    
+    # Find and parse the generated remediation script for structured data
+    $remediationScriptPath = if ($remediateOutput -match 'Detailed remediation script exported to:\s+([^\r\n]+)') { 
+        $matches[1].Trim() 
+    } else { 
+        $null 
+    }
+    
+    $vaultIssues = @{}
+    $issueDetails = @()
+    
+    if ($remediationScriptPath -and (Test-Path $remediationScriptPath)) {
+        $scriptContent = Get-Content $remediationScriptPath -Raw
+        
+        # Parse vault sections using regex
+        $vaultPattern = '(?s)# ={40}\r?\n# Vault: ([^\r\n]+)\r?\n# Resource Group: ([^\r\n]+)\r?\n# Issues: (\d+)\r?\n# ={40}(.*?)(?=# ={40}|$)'
+        $vaultMatches = [regex]::Matches($scriptContent, $vaultPattern)
+        
+        foreach ($match in $vaultMatches) {
+            $vaultName = $match.Groups[1].Value.Trim()
+            $rgName = $match.Groups[2].Value.Trim()
+            $issueCount = $match.Groups[3].Value.Trim()
+            $issuesSection = $match.Groups[4].Value
+            
+            # Parse individual issues
+            $issuePattern = '(?s)# Issue: ([^\r\n]+)\r?\n# Severity: ([^\r\n]+)\r?\n# Framework: ([^\r\n]+)'
+            $issueMatches = [regex]::Matches($issuesSection, $issuePattern)
+            
+            $issues = @()
+            foreach ($issueMatch in $issueMatches) {
+                $issues += @{
+                    description = $issueMatch.Groups[1].Value.Trim()
+                    severity = $issueMatch.Groups[2].Value.Trim()
+                    framework = $issueMatch.Groups[3].Value.Trim()
+                }
+            }
+            
+            $vaultIssues[$vaultName] = @{
+                resourceGroup = $rgName
+                issueCount = [int]$issueCount
+                issues = $issues
+            }
+        }
+    }
+    
+    $remHtml = @()
+    $remHtml += "<!doctype html><html><head><meta charset='utf-8'><title>Remediation Result - $WorkflowRunId</title>"
+    $remHtml += "<style>body{font-family:'Segoe UI',sans-serif;margin:20px;background:#f5f5f5}"
+    $remHtml += ".container{max-width:1200px;margin:0 auto;background:white;padding:30px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}"
+    $remHtml += "h1,h2{color:#667eea;border-bottom:3px solid #667eea;padding-bottom:10px}"
+    $remHtml += "h2{font-size:1.5em;margin-top:30px;margin-bottom:15px}"
+    $remHtml += ".summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin:20px 0}"
+    $remHtml += ".card{background:#f8f9fa;padding:20px;border-radius:8px;text-align:center;transition:transform 0.2s}"
+    $remHtml += ".card:hover{transform:translateY(-5px);box-shadow:0 4px 12px rgba(0,0,0,0.15)}"
+    $remHtml += ".card .value{font-size:2.5em;font-weight:bold;color:#667eea}"
+    $remHtml += ".card .label{color:#666;margin-top:5px}"
+    $remHtml += ".card.success-card{border-left:4px solid #28a745}"
+    $remHtml += ".card.warning-card{border-left:4px solid #ffc107}"
+    $remHtml += ".card.danger-card{border-left:4px solid #dc3545}"
+    $remHtml += ".success{color:#28a745}.warning{color:#ffc107}.danger{color:#dc3545}"
+    $remHtml += ".key-takeaways{background:#e7f3ff;padding:20px;border-radius:8px;margin:20px 0;border-left:4px solid #17a2b8}"
+    $remHtml += ".key-takeaways h3{color:#0c5460;margin-bottom:15px}"
+    $remHtml += ".key-takeaways ul{margin-left:20px;line-height:1.8}"
+    $remHtml += ".key-takeaways li{color:#333}"
+    $remHtml += ".devtest-warning{background:#fff3cd;border:2px solid #ffc107;border-radius:8px;padding:20px;margin:20px 0;box-shadow:0 2px 8px rgba(255,193,7,0.2)}"
+    $remHtml += ".devtest-warning h3{color:#856404;margin:0 0 10px 0;font-size:1.2em}"
+    $remHtml += ".devtest-warning ul{margin:10px 0 0 20px;color:#856404;line-height:1.8}"
+    $remHtml += "pre{white-space:pre-wrap;background:#f7f7f7;padding:12px;border:1px solid #ddd;border-radius:4px;font-size:0.9em;max-height:500px;overflow-y:auto}</style></head><body>"
+    $remHtml += "<div class='container'><h1>🔧 Remediation Result - $WorkflowRunId</h1>"
+    
+    # Add DevTestMode warning banner if applicable
+    if ($DevTestMode) {
+        $remHtml += "<div class='devtest-warning'>"
+        $remHtml += "<h3>⚠️ DEV/TEST MODE ENABLED ⚠️</h3>"
+        $remHtml += "<p><strong>This report shows results from FULL AUTO-REMEDIATION mode.</strong> The following breaking changes were applied:</p>"
+        $remHtml += "<ul>"
+        $remHtml += "<li><strong>RBAC Migration:</strong> Access policies cleared, RBAC authorization enabled (may break existing apps)</li>"
+        $remHtml += "<li><strong>Firewall:</strong> Default action set to Deny (blocks all traffic except Azure services)</li>"
+        $remHtml += "<li><strong>Diagnostic Logging:</strong> Auto-created Log Analytics workspace and enabled full diagnostics</li>"
+        $remHtml += "<li><strong>Expiration:</strong> 90-day expiration set on all secrets and keys without expiration dates</li>"
+        $remHtml += "</ul>"
+        $remHtml += "<p><strong>⚠️ DO NOT USE IN PRODUCTION - Test environments only!</strong></p>"
+        $remHtml += "</div>"
+    }
+    
+    $remHtml += "<p><strong>Mode:</strong> $(if ($DevTestMode) { '<span class=danger>🔥 DevTest Mode (full auto-fix + breaking changes)</span>' } elseif ($AutoRemediate.IsPresent) { '<span class=success>✓ Auto-Remediate (safe fixes only)</span>' } else { '<span class=warning>👁 Scan-Only (preview)</span>' })</p>"
+    $remHtml += "<div class='summary'>"
+    $remHtml += "<div class='card'><div class='value'>$vaultsScanned</div><div class='label'>Vaults Scanned</div></div>"
+    $remHtml += "<div class='card danger-card'><div class='value' style='color:#dc3545'>$totalIssues</div><div class='label'>Total Issues</div></div>"
+    $remHtml += "<div class='card success-card'><div class='value' style='color:#28a745'>$issuesFixed</div><div class='label'>Auto-Fixed</div></div>"
+    $remHtml += "<div class='card warning-card'><div class='value' style='color:#ffc107'>$manualReview</div><div class='label'>Manual Review</div></div>"
+    $remHtml += "</div>"
+    $remHtml += "<div class='key-takeaways'><h3>📋 Key Takeaways</h3><ul>"
+    if ($DevTestMode) {
+        if ($issuesFixed -gt 0) {
+            $remHtml += "<li><strong>✓ $issuesFixed issue(s) automatically remediated</strong> in DevTest Mode (includes RBAC, firewall, logging, expiration)</li>"
+        }
+        if ($manualReview -eq 0) {
+            $remHtml += "<li><strong>🎯 All issues auto-fixed</strong> - DevTest Mode enables complete remediation without manual intervention</li>"
+        } elseif ($manualReview -gt 0) {
+            $remHtml += "<li><strong>⚠ $manualReview issue(s) still require manual review</strong> - unexpected for DevTest Mode, please investigate</li>"
+        }
+    } else {
+        if ($issuesFixed -gt 0) {
+            $remHtml += "<li><strong>✓ $issuesFixed issue(s) automatically remediated</strong> - soft delete and purge protection enablement</li>"
+        }
+        if ($manualReview -gt 0) {
+            $remHtml += "<li><strong>⚠ $manualReview issue(s) require manual review</strong> - firewall rules, RBAC migration, logging configuration, expiration policies</li>"
+            $remHtml += "<li><strong>💡 Tip:</strong> Use <code>-DevTestMode</code> to auto-fix all issues in test environments (includes breaking changes)</li>"
+        }
+    }
+    $remHtml += "<li>Compliance state will update in Azure Policy within 15-30 minutes</li>"
+    $remHtml += "<li>Check the detailed output below for vault-specific recommendations</li>"
+    $remHtml += "</ul></div>"
+    $remHtml += "<details style='margin-top: 30px; background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea;'>"
+    $remHtml += "<summary style='font-size: 1.1em; font-weight: bold; color: #667eea; cursor: pointer; user-select: none;'>📖 Understanding Remediation Modes</summary>"
+    $remHtml += "<div style='margin-top: 15px;'>"
+    $remHtml += "<h4 style='color: #667eea; margin-top: 15px;'>Available Modes</h4>"
+    $remHtml += "<ul style='line-height: 1.8;'>"
+    $remHtml += "<li><strong>Scan-Only (Default)</strong>: Preview mode - identifies issues but makes no changes. Use for initial assessment.</li>"
+    $remHtml += "<li><strong>AutoRemediate</strong>: Safe auto-fix mode - automatically enables soft delete and purge protection only. Production-safe.</li>"
+    $remHtml += "<li><strong>DevTestMode</strong>: Full auto-fix mode - remediates ALL issues including RBAC migration, firewall, logging, and expiration. Test environments only!</li>"
+    $remHtml += "</ul>"
+    $remHtml += "<h4 style='color: #667eea; margin-top: 15px;'>What Gets Auto-Fixed?</h4>"
+    $remHtml += "<table style='width: 100%; border-collapse: collapse; margin-top: 10px;'>"
+    $remHtml += "<tr style='background: #667eea; color: white;'><th style='padding: 8px; text-align: left;'>Issue Type</th><th style='padding: 8px;'>AutoRemediate</th><th style='padding: 8px;'>DevTestMode</th></tr>"
+    $remHtml += "<tr style='border-bottom: 1px solid #ddd;'><td style='padding: 8px;'>Soft Delete</td><td style='padding: 8px; text-align: center;'>✓</td><td style='padding: 8px; text-align: center;'>✓</td></tr>"
+    $remHtml += "<tr style='border-bottom: 1px solid #ddd;'><td style='padding: 8px;'>Purge Protection</td><td style='padding: 8px; text-align: center;'>✓</td><td style='padding: 8px; text-align: center;'>✓</td></tr>"
+    $remHtml += "<tr style='border-bottom: 1px solid #ddd;'><td style='padding: 8px;'>RBAC Migration</td><td style='padding: 8px; text-align: center;'>❌ Manual</td><td style='padding: 8px; text-align: center;'>✓ Auto (⚠️ breaks access policies)</td></tr>"
+    $remHtml += "<tr style='border-bottom: 1px solid #ddd;'><td style='padding: 8px;'>Firewall Configuration</td><td style='padding: 8px; text-align: center;'>❌ Manual</td><td style='padding: 8px; text-align: center;'>✓ Auto (deny all + Azure bypass)</td></tr>"
+    $remHtml += "<tr style='border-bottom: 1px solid #ddd;'><td style='padding: 8px;'>Diagnostic Logging</td><td style='padding: 8px; text-align: center;'>❌ Manual</td><td style='padding: 8px; text-align: center;'>✓ Auto (creates Log Analytics)</td></tr>"
+    $remHtml += "<tr style='border-bottom: 1px solid #ddd;'><td style='padding: 8px;'>Secret/Key Expiration</td><td style='padding: 8px; text-align: center;'>❌ Manual</td><td style='padding: 8px; text-align: center;'>✓ Auto (90-day default)</td></tr>"
+    $remHtml += "</table>"
+    $remHtml += "<h4 style='color: #667eea; margin-top: 15px;'>DevTestMode Warnings</h4>"
+    $remHtml += "<ul style='line-height: 1.8; color: #d63031;'>"
+    $remHtml += "<li><strong>RBAC Migration:</strong> Clears all access policies. Ensure you have Owner/Contributor role or RBAC permissions before running.</li>"
+    $remHtml += "<li><strong>Firewall:</strong> Blocks all external access except Azure services. May break applications connecting from specific IPs.</li>"
+    $remHtml += "<li><strong>Expiration:</strong> Sets 90-day expiration on ALL secrets/keys. Test applications must be able to handle rotation.</li>"
+    $remHtml += "</ul>"
+    $remHtml += "<p style='margin-top: 15px;'><strong>💡 Best Practice:</strong> Always test remediation in dev/test environments before applying to production vaults.</p>"
+    $remHtml += "</div></details>"
+    
+    # Add structured Issues Breakdown section
+    if ($vaultIssues.Count -gt 0) {
+        $remHtml += "<h2>🔍 Issues Found - Easy-to-Read Breakdown</h2>"
+        $remHtml += "<div style='margin: 20px 0;'>"
+        
+        foreach ($vaultName in ($vaultIssues.Keys | Sort-Object)) {
+            $vault = $vaultIssues[$vaultName]
+            $remHtml += "<details open style='margin: 15px 0; background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid " + $(if ($vault.issueCount -gt 3) { "#dc3545" } elseif ($vault.issueCount -gt 1) { "#ffc107" } else { "#17a2b8" }) + ";'>"
+            $remHtml += "<summary style='cursor: pointer; font-weight: bold; font-size: 1.1em; color: #333; user-select: none;'>🏦 $vaultName - $($vault.issueCount) Issue(s)</summary>"
+            $remHtml += "<div style='margin-top: 15px;'>"
+            $remHtml += "<p style='color: #666; font-size: 0.9em; margin: 5px 0;'><strong>Resource Group:</strong> $($vault.resourceGroup)</p>"
+            
+            if ($vault.issues.Count -gt 0) {
+                $remHtml += "<table style='width: 100%; margin-top: 10px; border-collapse: collapse;'>"
+                $remHtml += "<thead><tr style='background: #667eea; color: white;'><th style='padding: 10px; text-align: left;'>Issue</th><th style='padding: 10px; width: 100px;'>Severity</th><th style='padding: 10px;'>Framework</th></tr></thead>"
+                $remHtml += "<tbody>"
+                
+                foreach ($issue in $vault.issues) {
+                    $severityBadge = switch ($issue.severity) {
+                        "High" { "<span style='background: #dc3545; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em;'>🔴 High</span>" }
+                        "Medium" { "<span style='background: #ffc107; color: #856404; padding: 4px 12px; border-radius: 12px; font-size: 0.85em;'>🟡 Medium</span>" }
+                        default { "<span style='background: #17a2b8; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em;'>🔵 $($issue.severity)</span>" }
+                    }
+                    
+                    $remHtml += "<tr style='border-bottom: 1px solid #ddd;'>"
+                    $remHtml += "<td style='padding: 10px;'><strong>$($issue.description)</strong></td>"
+                    $remHtml += "<td style='padding: 10px; text-align: center;'>$severityBadge</td>"
+                    $remHtml += "<td style='padding: 10px; font-size: 0.85em; color: #666;'>$($issue.framework)</td>"
+                    $remHtml += "</tr>"
+                }
+                
+                $remHtml += "</tbody></table>"
+            }
+            
+            $remHtml += "</div></details>"
+        }
+        
+        $remHtml += "</div>"
+    }
+    
+    # Add structured Fixes Applied section
+    if ($issuesFixed -gt 0 -or $vaultIssues.Count -gt 0) {
+        $remHtml += "<h2>✅ Fixes Applied - What Was Changed</h2>"
+        $remHtml += "<div style='background: #d4edda; border: 2px solid #28a745; border-radius: 8px; padding: 20px; margin: 20px 0;'>"
+        $remHtml += "<h3 style='color: #155724; margin-top: 0;'>Remediation Summary</h3>"
+        
+        if ($issuesFixed -gt 0) {
+            $remHtml += "<p style='color: #155724; font-size: 1.1em; margin: 10px 0;'><strong>✓ $issuesFixed issue(s) were automatically fixed</strong></p>"
+            
+            # Build a list of common fixes
+            $fixCategories = @()
+            if ($remediateOutput -match 'Purge protection' -or $remediateOutput -match 'EnablePurgeProtection') {
+                $fixCategories += "<li><strong>Purge Protection Enabled:</strong> Protects Key Vaults from accidental permanent deletion (cannot be disabled once enabled)</li>"
+            }
+            if ($remediateOutput -match 'Soft delete' -or $remediateOutput -match 'EnableSoftDelete') {
+                $fixCategories += "<li><strong>Soft Delete Enabled:</strong> Allows recovery of deleted vaults and objects within retention period (90 days)</li>"
+            }
+            if ($DevTestMode) {
+                if ($remediateOutput -match 'RBAC' -or $remediateOutput -match 'DisableRbacAuthorization') {
+                    $fixCategories += "<li><strong>RBAC Migration:</strong> Switched from legacy access policies to Azure RBAC for permission management (⚠️ breaking change)</li>"
+                }
+                if ($remediateOutput -match 'firewall' -or $remediateOutput -match 'NetworkRuleSet') {
+                    $fixCategories += "<li><strong>Firewall Configured:</strong> Set default action to Deny with Azure Services bypass (blocks external access)</li>"
+                }
+                if ($remediateOutput -match 'diagnostic' -or $remediateOutput -match 'DiagnosticSetting') {
+                    $fixCategories += "<li><strong>Diagnostic Logging:</strong> Enabled audit event logging to Log Analytics workspace for compliance monitoring</li>"
+                }
+                if ($remediateOutput -match 'expiration' -or $remediateOutput -match 'ExpiresOn') {
+                    $fixCategories += "<li><strong>Expiration Dates Set:</strong> Added 90-day expiration to secrets and keys without expiration dates</li>"
+                }
+            }
+            
+            if ($fixCategories.Count -gt 0) {
+                $remHtml += "<ul style='color: #155724; line-height: 1.8; margin-top: 15px;'>"
+                $remHtml += $fixCategories -join "`n"
+                $remHtml += "</ul>"
+            }
+        }
+        
+        if ($manualReview -gt 0) {
+            $remHtml += "<hr style='margin: 20px 0; border: none; border-top: 1px solid #28a745;'>"
+            $remHtml += "<h3 style='color: #856404;'>⚠️ Manual Review Required: $manualReview Issue(s)</h3>"
+            $remHtml += "<p style='color: #856404;'>The following issues require manual configuration:</p>"
+            $remHtml += "<ul style='color: #856404; line-height: 1.8;'>"
+            if ($remediateOutput -match 'RBAC migration' -and -not $DevTestMode) {
+                $remHtml += "<li><strong>RBAC Migration:</strong> Review access policies and plan migration to Azure RBAC (requires testing)</li>"
+            }
+            if ($remediateOutput -match 'firewall' -and -not $DevTestMode) {
+                $remHtml += "<li><strong>Network Firewall:</strong> Configure IP allowlist or VNet rules based on your security requirements</li>"
+            }
+            if ($remediateOutput -match 'Diagnostic logging' -and -not $DevTestMode) {
+                $remHtml += "<li><strong>Diagnostic Logging:</strong> Create or specify Log Analytics workspace and enable audit logging</li>"
+            }
+            if ($remediateOutput -match 'expiration' -and -not $DevTestMode) {
+                $remHtml += "<li><strong>Secret/Key Expiration:</strong> Set expiration dates based on your rotation policies (business decision required)</li>"
+            }
+            $remHtml += "</ul>"
+            $remHtml += "<p style='color: #856404; margin-top: 10px;'><strong>💡 Tip:</strong> Check the generated remediation script for detailed commands and examples.</p>"
+        }
+        
+        $remHtml += "</div>"
+    }
+    
+    $remHtml += "<h2>📄 Detailed Output</h2><pre>" + [System.Web.HttpUtility]::HtmlEncode($remediateOutput) + "</pre></div></body></html>"
+    $remHtml -join "`n" | Out-File -FilePath $remediationHtml -Encoding UTF8
+
+    $artifacts += @{ step = 5; name = "Remediation"; json = $remediationJson; html = $remediationHtml }
+    Write-Host "✓ Remediation step completed: $remediationJson, $remediationHtml" -ForegroundColor Green
+}
+catch {
+    Write-Host "✗ Remediation step failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# ============================================
+# STEP 6: Capture After-Remediation State
+# ============================================
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+Write-Host "STEP 6: Capturing After-Remediation State" -ForegroundColor Cyan
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+
+try {
+    $afterJson = Join-Path $jsonDir "after-remediation-$WorkflowRunId.json"
+    $afterHtml = Join-Path $htmlDir "after-remediation-$WorkflowRunId.html"
+    
+    Write-Host "Capturing environment state after remediation..." -ForegroundColor Gray
+    $afterDocParams = @{
+        OutputPath = $afterJson
+    }
+    if ($ResourceGroupName) {
+        $afterDocParams['ResourceGroupName'] = $ResourceGroupName
+    }
+    
+    $afterOutput = & "$PSScriptRoot\Document-PolicyEnvironmentState.ps1" @afterDocParams
+    
+    # Load the after-remediation state for HTML generation
+    if (Test-Path $afterJson) {
+        $afterStateData = Get-Content $afterJson -Raw | ConvertFrom-Json
+        $afterHtmlContent = Generate-EnvironmentStateHtml -StateData $afterStateData -Title "After-Remediation Environment State"
+        $afterHtmlContent | Out-File $afterHtml -Encoding UTF8
+        
+        $artifacts += @{ step = 6; name = "After-Remediation State"; json = $afterJson; html = $afterHtml }
+        Write-Host "✓ Step 6 Complete: $afterJson, $afterHtml" -ForegroundColor Green
+    } else {
+        Write-Host "⚠ After-remediation state file not found" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "✗ Step 6 Failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# ============================================
+# STEP 7: Wait for Azure Policy Compliance Update (Optional)
+# ============================================
+if (-not $SkipComplianceWait) {
+    Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    Write-Host "STEP 7: Waiting for Azure Policy Compliance Update" -ForegroundColor Cyan
+    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+    
+    Write-Host "`nAzure Policy compliance state typically updates within 15-30 minutes." -ForegroundColor Yellow
+    Write-Host "This wait allows Azure Policy to acknowledge the remediation changes." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "Options:" -ForegroundColor Cyan
+    Write-Host "  1. Wait 20 minutes for Azure Policy to update (recommended)" -ForegroundColor White
+    Write-Host "  2. Skip wait and continue (compliance won't reflect fixes yet)" -ForegroundColor White
+    Write-Host ""
+    
+    $response = Read-Host "Wait for compliance update? (Y/N) [Y]"
+    if ($response -eq "" -or $response -eq "Y" -or $response -eq "y") {
+        $waitMinutes = 20
+        Write-Host "`n⏳ Waiting $waitMinutes minutes for Azure Policy compliance update..." -ForegroundColor Cyan
+        Write-Host "Start time: $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Gray
+        
+        for ($i = $waitMinutes; $i -gt 0; $i--) {
+            $remaining = $i
+            Write-Host "`r  ⏱️  $remaining minutes remaining...  " -NoNewline -ForegroundColor Yellow
+            Start-Sleep -Seconds 60
+        }
+        Write-Host "`n✓ Wait complete! Azure Policy should now reflect remediation changes." -ForegroundColor Green
+        
+        # Re-capture compliance report with updated Azure Policy state
+        Write-Host "`nRe-scanning compliance state with updated Azure Policy data..." -ForegroundColor Cyan
+        try {
+            $finalComplianceJson = Join-Path $jsonDir "compliance-report-final-$WorkflowRunId.json"
+            $finalComplianceCsv = Join-Path $csvDir "compliance-report-final-$WorkflowRunId.csv"
+            
+            $policyStates = Get-AzPolicyState -SubscriptionId $SubscriptionId -Filter "ResourceType eq 'Microsoft.KeyVault/vaults'" -ErrorAction SilentlyContinue
+            if ($policyStates) {
+                $complianceData = @{
+                    timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+                    subscriptionId = $SubscriptionId
+                    resourceGroup = $ResourceGroupName
+                    scanType = "Final (Post-Remediation)"
+                    totalEvaluations = $policyStates.Count
+                    compliant = ($policyStates | Where-Object { $_.ComplianceState -eq 'Compliant' }).Count
+                    nonCompliant = ($policyStates | Where-Object { $_.ComplianceState -eq 'NonCompliant' }).Count
+                    policies = $policyStates | Select-Object PolicyDefinitionName, ResourceId, ComplianceState, PolicyDefinitionId | Sort-Object PolicyDefinitionName
+                }
+                
+                $complianceData | ConvertTo-Json -Depth 10 | Out-File $finalComplianceJson -Encoding UTF8
+                $complianceData.policies | Export-Csv $finalComplianceCsv -NoTypeInformation -Encoding UTF8
+                
+                Write-Host "✓ Final compliance scan complete: $finalComplianceJson" -ForegroundColor Green
+            }
+        } catch {
+            Write-Host "⚠ Final compliance scan failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "⏭️  Skipped compliance wait. Azure Policy state may not reflect remediation yet." -ForegroundColor Yellow
+    }
+}
+
+# ============================================
+# STEP 8: Generate Comprehensive Report
+# ============================================
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+Write-Host "STEP 8: Generating Comprehensive Report" -ForegroundColor Cyan
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+
+try {
+    $report = & "$PSScriptRoot\Generate-ComprehensiveReport.ps1" -WorkflowRunId $WorkflowRunId
+    # Add comprehensive report to artifacts array so it gets opened
+    $artifacts += @{ step = 8; name = "Comprehensive Report"; json = $report.json; html = $report.html }
+    Write-Host "✓ Comprehensive Report Generated" -ForegroundColor Green
+    Write-Host "  HTML: $($report.html)" -ForegroundColor Gray
+    Write-Host "  JSON: $($report.json)" -ForegroundColor Gray
+} catch {
+    Write-Host "✗ Comprehensive Report Failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Final Summary
+$workflowDuration = ((Get-Date) - $workflowStart).TotalMinutes
+
+Write-Host "`n╔════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
+Write-Host "║                                                                ║" -ForegroundColor Green
+Write-Host "║                 ✅ WORKFLOW COMPLETE ✅                        ║" -ForegroundColor Green
+Write-Host "║                                                                ║" -ForegroundColor Green
+Write-Host "╚════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+Write-Host ""
+Write-Host "Workflow Run ID: $WorkflowRunId" -ForegroundColor Cyan
+Write-Host "Duration: $([math]::Round($workflowDuration, 2)) minutes" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Generated Artifacts:" -ForegroundColor Yellow
+$artifacts | ForEach-Object {
+    Write-Host "  Step $($_.step) - $($_.name):" -ForegroundColor Gray
+    if ($_.json) { Write-Host "    📄 JSON: $($_.json)" -ForegroundColor Gray }
+    if ($_.html) { Write-Host "    🌐 HTML: $($_.html)" -ForegroundColor Gray }
+    if ($_.csv) { Write-Host "    📊 CSV: $($_.csv)" -ForegroundColor Gray }
+}
+Write-Host ""
+
+# Create an artifacts manifest (JSON) for callers to consume and for audit
+$manifest = @(
+)
+foreach ($a in $artifacts) {
+    $entry = [PSCustomObject]@{
+        step = $a.step
+        name = $a.name
+        json = if ($a.json) { (Resolve-Path -LiteralPath $a.json).Path } else { $null }
+        html = if ($a.html -and ($a.html -ne '(see comprehensive report)')) { (Resolve-Path -LiteralPath $a.html).Path } else { $null }
+        csv = if ($a.csv) { (Resolve-Path -LiteralPath $a.csv).Path } else { $null }
+    }
+    $manifest += $entry
+}
+
+$manifestPath = Join-Path $jsonDir ("artifacts-manifest-$WorkflowRunId.json")
+$manifest | ConvertTo-Json -Depth 5 | Out-File $manifestPath -Encoding UTF8
+Write-Host "Artifacts manifest saved: $manifestPath" -ForegroundColor Cyan
+
+# Inline artifacts summary generation (CSV + HTML)
+try {
+    $manifestJson = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+    $runId = if ($WorkflowRunId) { $WorkflowRunId } else { (Get-Date -Format 'yyyyMMdd-HHmmss') }
+
+    $summaryRows = @()
+    foreach ($entry in $manifestJson) {
+        $jsonPath = if ($entry.json) { $entry.json } else { $null }
+        $htmlPath = if ($entry.html) { $entry.html } else { $null }
+        $csvPath = if ($entry.csv) { $entry.csv } else { $null }
+
+        $jsonExists = $false; $jsonSize=''; $jsonMod=''
+        if ($jsonPath -and (Test-Path $jsonPath)) { $fi = Get-Item $jsonPath; $jsonExists = $true; $jsonSize = [math]::Round($fi.Length/1KB,2); $jsonMod = $fi.LastWriteTime }
+        $htmlExists = $false; $htmlSize=''; $htmlMod=''
+        if ($htmlPath -and (Test-Path $htmlPath)) { $fi = Get-Item $htmlPath; $htmlExists = $true; $htmlSize = [math]::Round($fi.Length/1KB,2); $htmlMod = $fi.LastWriteTime }
+        $csvExists = $false; $csvSize=''; $csvMod=''
+        if ($csvPath -and (Test-Path $csvPath)) { $fi = Get-Item $csvPath; $csvExists = $true; $csvSize = [math]::Round($fi.Length/1KB,2); $csvMod = $fi.LastWriteTime }
+
+        $summaryRows += [PSCustomObject]@{
+            Step = $entry.step
+            Name = $entry.name
+            JSON = if ($jsonPath) { Split-Path -Leaf $jsonPath } else { '' }
+            JSON_Exists = $jsonExists
+            JSON_KB = $jsonSize
+            JSON_Modified = $jsonMod
+            HTML = if ($htmlPath) { Split-Path -Leaf $htmlPath } else { '' }
+            HTML_Exists = $htmlExists
+            HTML_KB = $htmlSize
+            HTML_Modified = $htmlMod
+            CSV = if ($csvPath) { Split-Path -Leaf $csvPath } else { '' }
+            CSV_Exists = $csvExists
+            CSV_KB = $csvSize
+            CSV_Modified = $csvMod
+        }
+    }
+
+    $summaryCsv = Join-Path $csvDir "artifacts-summary-$runId.csv"
+    $summaryHtml = Join-Path $htmlDir "artifacts-summary-$runId.html"
+    $summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
+
+    # Build a simple HTML with links
+    $htmlOut = @()
+    $htmlOut += '<!doctype html>'
+    $htmlOut += '<html><head><meta charset="utf-8"><title>Artifacts Summary - ' + $runId + '</title>'
+    $htmlOut += '<style>table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;text-align:left}th{background:#f4f4f4}</style>'
+    $htmlOut += '</head><body>'
+    $htmlOut += '<h1>Artifacts Summary - ' + $runId + '</h1>'
+    $htmlOut += '<p>Generated: ' + (Get-Date).ToString() + '</p>'
+    $htmlOut += '<table><thead><tr><th>Step</th><th>Name</th><th>JSON</th><th>HTML</th><th>CSV</th><th>Notes</th></tr></thead><tbody>'
+
+    foreach ($r in $summaryRows) {
+        $notes = @()
+        $jsonLink = ''
+        if ($r.JSON) {
+            if ($r.JSON_Exists) { $jsonLink = "<a href='../json/" + [System.Web.HttpUtility]::HtmlEncode($r.JSON) + "'>" + [System.Web.HttpUtility]::HtmlEncode($r.JSON) + "</a>" } else { $jsonLink = [System.Web.HttpUtility]::HtmlEncode($r.JSON); $notes += 'JSON missing' }
+        }
+        $htmlLink = ''
+        if ($r.HTML) {
+            if ($r.HTML_Exists) { $htmlLink = "<a href='" + [System.Web.HttpUtility]::HtmlEncode($r.HTML) + "'>" + [System.Web.HttpUtility]::HtmlEncode($r.HTML) + "</a>" } else { $htmlLink = [System.Web.HttpUtility]::HtmlEncode($r.HTML); $notes += 'HTML missing' }
+        }
+        $csvLink = ''
+        if ($r.CSV) {
+            if ($r.CSV_Exists) { $csvLink = "<a href='../csv/" + [System.Web.HttpUtility]::HtmlEncode($r.CSV) + "'>" + [System.Web.HttpUtility]::HtmlEncode($r.CSV) + "</a>" } else { $csvLink = [System.Web.HttpUtility]::HtmlEncode($r.CSV); $notes += 'CSV missing' }
+        }
+
+        $notesText = if ($notes.Count -gt 0) { [System.Web.HttpUtility]::HtmlEncode(($notes -join '; ')) } else { '' }
+        $htmlOut += "<tr><td>" + [System.Web.HttpUtility]::HtmlEncode($r.Step) + "</td><td>" + [System.Web.HttpUtility]::HtmlEncode($r.Name) + "</td><td>" + $jsonLink + "</td><td>" + $htmlLink + "</td><td>" + $csvLink + "</td><td>" + $notesText + "</td></tr>"
+    }
+
+    $htmlOut += '</tbody></table>'
+    $htmlOut += "<p>CSV: <a href='../csv/" + (Split-Path -Leaf $summaryCsv) + "'>" + (Split-Path -Leaf $summaryCsv) + "</a></p>"
+    $htmlOut += '</body></html>'
+    $htmlOut -join "`n" | Out-File -FilePath $summaryHtml -Encoding UTF8
+
+    Write-Host "Artifacts summary written: $summaryCsv" -ForegroundColor Cyan
+    Write-Host "Artifacts summary written: $summaryHtml" -ForegroundColor Cyan
+} catch {
+    Write-Host "Warning: failed to generate artifacts summary: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
+# If running interactively, open only HTML files created during this run
+try {
+    $isInteractive = [System.Environment]::UserInteractive -and ($Host.UI -ne $null)
+    if ($isInteractive) {
+        # Collect HTML paths from artifacts created during this run
+        $htmlFilesToOpen = @()
+        foreach ($artifact in $artifacts) {
+            if ($artifact.html -and ($artifact.html -ne '(see comprehensive report)') -and (Test-Path $artifact.html)) {
+                $htmlFilesToOpen += $artifact.html
+            }
+        }
+        # Also open the summary HTML if it exists
+        if (Test-Path $summaryHtml) {
+            $htmlFilesToOpen += $summaryHtml
+        }
+        
+        # Open each HTML file
+        foreach ($htmlPath in $htmlFilesToOpen) {
+            Start-Process -FilePath $htmlPath -WindowStyle Normal
+        }
+        Write-Host "Opened $($htmlFilesToOpen.Count) HTML report(s) from this run in the default browser." -ForegroundColor Green
+    }
+} catch {
+    Write-Host "Warning: failed to open HTML reports: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+# Return manifest path and artifacts for callers
+return @{
+    manifest = $manifestPath
+    artifacts = $artifacts
+}
+

@@ -1,0 +1,29 @@
+# Artifacts - runtime generated files
+artifacts/**/*.json
+artifacts/**/*.html
+artifacts/**/*.csv
+
+# VS Code history
+.history/
+
+# Test output files
+*.log
+
+# Certificate files (sensitive)
+*.pfx
+*.pem
+*.cer
+
+# Backup files
+*.bak
+
+# Test inventory files
+inventory-*.json
+complete-file-inventory.csv
+detailed-inventory-before-reorg.csv
+test-baseline-*.json
+
+# AI temp files
+ai_input_*.txt
+ai_test_runner.ps1
+move_ai_files.ps1

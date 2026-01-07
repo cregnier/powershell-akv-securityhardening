@@ -1,0 +1,40 @@
+Pass	(unknown)
+Pass	(unknown)
+Pass	(unknown)
+Pass	(unknown)
+Pass	(unknown)
+Pass	(unknown)
+Pass	(unknown)
+Pass	(unknown)
+Pass	(unknown)
+Fail	(unknown)
+Fail	(unknown)
+Fail	(unknown)
+(unknown)	Certificate Validity Period - Deny Mode
+(unknown)	(unknown)
+(unknown)	Certificate Issuer (CA) - Deny Mode
+(unknown)	(unknown)
+(unknown)	Non-Integrated CA - Deny Mode
+(unknown)	(unknown)
+(unknown)	Soft Delete - Deny Mode
+(unknown)	(unknown)
+(unknown)	Purge Protection - Deny Mode
+(unknown)	(unknown)
+(unknown)	RBAC Authorization - Deny Mode
+(unknown)	(unknown)
+(unknown)	Firewall and Network Access - Deny Mode
+(unknown)	(unknown)
+(unknown)	Key Expiration - Deny Mode
+(unknown)	(unknown)
+(unknown)	Key Expiration
+(unknown)	(unknown)
+(unknown)	Key Type (RSA/EC)
+(unknown)	(unknown)
+(unknown)	Firewall and Network Access
+(unknown)	(unknown)
+(unknown)	Diagnostic Logging
+(unknown)	(unknown)
+(unknown)	Secret Expiration - Deny Mode
+(unknown)	(unknown)
+(unknown)	Secret Expiration
+(unknown)	(unknown)

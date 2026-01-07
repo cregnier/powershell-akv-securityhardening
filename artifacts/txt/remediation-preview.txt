@@ -1,0 +1,21 @@
+
+   Tenant: yeshualoves.me (21bd262e-3255-411e-8345-51102d9d9e9e)
+
+SubscriptionName            SubscriptionId                       Account                 Environment
+----------------            --------------                       -------                 -----------
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+MSDN Platforms Subscription ab1336c7-687d-4107-b0f6-9649a0458adb theregniers@hotmail.com AzureCloud
+
