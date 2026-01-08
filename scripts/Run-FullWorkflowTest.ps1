@@ -173,7 +173,8 @@ try {
     # Run the comprehensive workflow script
     .\scripts\Run-CompleteWorkflow.ps1 `
         -ResourceGroupName $rgName `
-        -ErrorAction Continue
+        -ErrorAction Continue `
+        -InvokedBy 'Run-FullWorkflowTest.ps1'
     
     Write-Host "✓ Workflow execution completed" -ForegroundColor Green
 }

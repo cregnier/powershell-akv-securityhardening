@@ -1,11 +1,40 @@
 # Workflow Enhancements Summary
 
-**Date:** January 6, 2026  
-**Enhancement Focus:** Comprehensive artifact generation and workflow reset capabilities
+**Date:** January 6, 2026 (Original) | January 8, 2026 (Updated)  
+**Enhancement Focus:** Comprehensive artifact generation, workflow reset capabilities, and report quality improvements
 
 ---
 
-## ✅ Requirements Addressed
+## Recent Updates (2026-01-08)
+
+### Report Quality Enhancements ✅
+
+All workflow and compliance reports now include:
+
+1. **Friendly Policy Names**: Policy GUIDs replaced with human-readable names
+   - Example: `a6abeaec...` → "Azure Key Vaults should use private link (a6abeaec...)"
+   - Applies to: compliance reports (HTML/JSON/CSV)
+
+2. **Evaluation Count Explanation**: Clear explanation why evaluations exceed vault count
+   - Azure Policy evaluates vault + secrets + keys + certificates separately
+   - Explanatory notes in CSV headers, JSON metadata, HTML descriptions
+
+3. **Comprehensive Metadata Footers**: All generated reports include:
+   - Script name
+   - Exact command used
+   - Mode (DevTest vs Production)
+   - Timestamp
+   - Workflow Run ID
+   - Applies to: All HTML/JSON/CSV reports
+
+**Files Enhanced:**
+- `Regenerate-ComplianceReport.ps1`: Policy names, evaluation explanations, footers
+- `Run-CompleteWorkflow.ps1`: Footers on all HTML reports (baseline, remediation, after-remediation, policy, compliance, artifacts summary)
+- `Document-PolicyEnvironmentState.ps1`: JSON metadata sections
+
+---
+
+## ✅ Requirements Addressed (Original Implementation)
 
 ### 1. Every Step Creates Artifacts ✅
 

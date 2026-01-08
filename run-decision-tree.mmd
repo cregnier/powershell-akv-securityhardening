@@ -1,0 +1,38 @@
+%%{init: {"flowchart": {"htmlLabels": true}} }%%
+%% Run Decision Tree — Mermaid
+flowchart TD
+  Start([Start: Run locally?])
+
+  Start --> CI_No
+  CI_No["<div style='font-weight:bold;color:#b21f2d;font-size:22px'>Run-FullWorkflowTest</div><div style='font-size:13px;color:#333'>SkipReset optional</div>"]
+  CI_No --> CreateEnv["<div style='font-weight:bold;color:#002b63;font-size:22px'>Create-PolicyTestEnvironment</div><div style='font-size:13px;color:#333'>SubscriptionId, ResourceGroupName, Location, CreateCompliant, CreateNonCompliant</div>"]
+  CreateEnv --> Core["<div style='font-weight:bold;color:#002b63;font-size:22px'>Run-CompleteWorkflow</div><div style='font-size:13px;color:#333'>ResourceGroupName, WorkflowRunId, DevTestMode, AutoRemediate, SkipPolicyDeployment, SkipComplianceWait, InvokedBy</div>"]
+  Core --> ResetEnv["<div style='font-weight:bold;color:#b21f2d;font-size:22px'>Reset-PolicyTestEnvironment</div><div style='font-size:13px;color:#333'>ResourceGroupName, WhatIf, Confirm</div>"]
+
+  Start --> Manual_Yes
+  Manual_Yes[Manual]
+  Manual_Yes --> FG_Interactive
+  FG_Interactive["<div style='font-weight:bold;color:#b21f2d;font-size:22px'>Run-ForegroundWorkflowTest</div><div style='font-size:13px;color:#333'>interactive prompts</div>"]
+  FG_Interactive --> CreateEnv2["<div style='font-weight:bold;color:#002b63;font-size:22px'>Create-PolicyTestEnvironment</div><div style='font-size:13px;color:#333'>SubscriptionId, ResourceGroupName, Location, CreateCompliant, CreateNonCompliant</div>"]
+  FG_Interactive --> Reuse[Reuse existing resources]
+  CreateEnv2 --> Core2["<div style='font-weight:bold;color:#002b63;font-size:22px'>Run-CompleteWorkflow</div><div style='font-size:13px;color:#333'>WorkflowRunId, DevTestMode, SkipComplianceWait, InvokedBy</div>"]
+  Reuse --> Core2
+  Core2 --> ResetEnv2[Reset Environment]
+
+  Manual_Yes --> CoreOnly["<div style='font-weight:bold;color:#002b63;font-size:22px'>Run-CompleteWorkflow</div><div style='font-size:13px;color:#333'>ResourceGroupName, WorkflowRunId, DevTestMode, InvokedBy</div>"]
+
+  classDef critical fill:#fff5f5,stroke:#d9534f,stroke-width:2
+  class ResetEnv,ResetEnv2 critical
+
+  %% Highlight script nodes (bigger font and accent color)
+  classDef scriptNode fill:#eaf2ff,stroke:#2b5aa6,stroke-width:2
+  class CI_No,CreateEnv,Core,ResetEnv,FG_Interactive,CreateEnv2,Core2,ResetEnv2,CoreOnly scriptNode
+
+  subgraph Notes[Notes]
+    N1[Use DevTestMode only in test environments]
+    N2[CI: prefer automated full test; use SkipReset to reuse environment]
+    N3[Manual demo: prefer interactive foreground runner]
+    N4[Core workflow supports InvokedBy and annotates artifacts]
+  end
+
+  Notes --> Start

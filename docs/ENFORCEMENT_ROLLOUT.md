@@ -1,5 +1,11 @@
 # Enforcement Rollout Plan (Draft)
 
+**Last Updated:** January 8, 2026
+
+**Note:** All compliance reports now include friendly policy names, evaluation explanations, and comprehensive metadata footers. See [COMPLIANCE_REPORT_ENHANCEMENT.md](COMPLIANCE_REPORT_ENHANCEMENT.md) for details.
+
+---
+
 Goal: Transition validated Key Vault policies from Audit -> Deny with minimal service disruption.
 
 Prerequisites

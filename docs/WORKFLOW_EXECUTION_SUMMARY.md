@@ -1,8 +1,25 @@
 # Workflow Execution Summary - January 6, 2026
 
-**Execution Date:** 2026-01-06 12:42 PM  
+**Execution Date:** 2026-01-06 12:42 PM (Updated: 2026-01-08)  
 **Scenario:** Complete Azure Key Vault Security Assessment & Remediation  
 **Status:** ✅ Successfully Validated End-to-End
+
+---
+
+## Recent Enhancements (2026-01-08)
+
+All workflow reports now include:
+
+1. **Friendly Policy Names**: GUIDs replaced with readable names (e.g., "Azure Key Vaults should use private link")
+2. **Evaluation Count Explanation**: Clear notes explaining why Azure Policy shows more evaluations than vaults
+3. **Comprehensive Metadata Footers**: All HTML/JSON/CSV reports include:
+   - Script name that generated the report
+   - Exact command used
+   - Mode (DevTest vs Production)
+   - Generation timestamp
+   - Workflow Run ID
+
+See [COMPLIANCE_REPORT_ENHANCEMENT.md](COMPLIANCE_REPORT_ENHANCEMENT.md) for details.
 
 ---
 

@@ -1,6 +1,66 @@
-# Report Enhancements Required
+# Report Enhancements
+**Last Updated:** 2026-01-08
 
-## Issues Identified
+## Recent Enhancements Completed (2026-01-08)
+
+### ✅ Friendly Policy Names
+**Status**: COMPLETED  
+**Issue**: Policy GUIDs (e.g., `a6abeaec-4d90-4a02-805f-6b26c4d3ffd9`) were not user-friendly  
+**Solution**: Added policy name mapping function in `Regenerate-ComplianceReport.ps1`  
+**Result**: Reports now show "Azure Key Vaults should use private link (a6abeaec...)" instead of GUIDs
+
+**Implemented Mappings:**
+- `a6abeaec-4d90-4a02-805f-6b26c4d3ffd9` → "Azure Key Vaults should use private link"
+- `cf820ca0-f99e-4f3e-84fb-66e913812d21` → "Azure Key Vault should have diagnostic logging enabled"
+
+**Files Modified:**
+- `scripts/Regenerate-ComplianceReport.ps1` (lines 118-135)
+
+---
+
+### ✅ Evaluation Count Explanation
+**Status**: COMPLETED  
+**Issue**: Users confused why 5 vaults show 15 policy evaluations  
+**Solution**: Added explanatory notes to all report formats  
+**Result**: 
+- CSV headers include explanation comments
+- JSON metadata includes note about evaluation methodology
+- HTML reports explain vault + resource-level evaluations
+
+**Example CSV Header:**
+```csv
+# NOTE: Evaluation count may exceed vault count because Azure Policy evaluates:
+# - Each Key Vault resource itself
+# - Individual secrets within each vault
+# - Individual keys within each vault
+# - Individual certificates within each vault
+# Example: 5 vaults with 2 secrets each = 5 vault evaluations + 10 secret evaluations = 15 total
+```
+
+**Files Modified:**
+- `scripts/Regenerate-ComplianceReport.ps1` (lines 155-168, 170-185)
+
+---
+
+### ✅ Report Metadata Footers
+**Status**: COMPLETED  
+**Issue**: Generated reports lacked metadata about how/when they were created  
+**Solution**: Added comprehensive footers to all report formats (HTML/JSON/CSV)  
+**Result**: All reports now include:
+- Script name that generated the report
+- Exact command used
+- Mode (DevTest vs Production)
+- Generation timestamp
+- Workflow Run ID
+
+**Files Modified:**
+- `scripts/Regenerate-ComplianceReport.ps1` (lines 244-256 HTML, 155-168 CSV, 170-185 JSON)
+- `scripts/Run-CompleteWorkflow.ps1` (multiple locations for baseline, remediation, after-remediation, policy, artifacts summary reports)
+- `scripts/Document-PolicyEnvironmentState.ps1` (lines 85-95 JSON)
+
+---
+
+## Original Enhancement Requests (Historical)
 
 ### 1. Compliance Report Issues (`compliance-report-*.html`)
 

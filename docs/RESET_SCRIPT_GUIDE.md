@@ -1,8 +1,10 @@
 # Reset Script Complete Guide
 
-**Date:** January 6, 2026  
+**Date:** January 6, 2026 (Updated: January 8, 2026)  
 **Script:** `Reset-PolicyTestEnvironment.ps1`  
 **Purpose:** Understanding when and how to use the reset script
+
+**Note (2026-01-08):** All workflow reports generated after reset now include friendly policy names and comprehensive metadata footers.
 
 ---
 

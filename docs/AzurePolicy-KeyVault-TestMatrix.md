@@ -1,5 +1,11 @@
 # Azure Policy Test Matrix for Key Vault Secrets Management
 
+**Last Updated:** January 8, 2026
+
+**Latest Enhancements (2026-01-08):** All compliance reports now display friendly policy names instead of GUIDs, making it easier to understand policy violations. See [COMPLIANCE_REPORT_ENHANCEMENT.md](COMPLIANCE_REPORT_ENHANCEMENT.md) for details.
+
+---
+
 ## Overview
 
 This document provides a comprehensive test matrix for Azure Policy enforcement on Azure Key Vault service, focusing on secrets management aligned with industry compliance frameworks.

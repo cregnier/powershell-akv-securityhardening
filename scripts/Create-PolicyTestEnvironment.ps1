@@ -80,6 +80,8 @@ $ErrorActionPreference = 'Stop'
 Import-Module Az.Accounts -MinimumVersion 2.0.0 -ErrorAction Stop
 Import-Module Az.Resources -MinimumVersion 6.0.0 -ErrorAction Stop
 Import-Module Az.KeyVault -MinimumVersion 4.0.0 -ErrorAction Stop
+Import-Module Az.Monitor -ErrorAction SilentlyContinue
+Import-Module Az.OperationalInsights -ErrorAction SilentlyContinue
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Azure Key Vault Policy Test Environment" -ForegroundColor Cyan
@@ -189,6 +191,26 @@ if ($CreateCompliant) {
             Write-Host "    ✗ Failed to create key: $($_.Exception.Message)" -ForegroundColor Red
         }
         
+        # Create compliant self-signed certificate for testing cert policies
+        # Note: In production, use integrated CAs (DigiCert, GlobalSign) after configuration
+        try {
+            $certPolicy = New-AzKeyVaultCertificatePolicy `
+                -SubjectName "CN=compliant-test.example.com" `
+                -IssuerName "Self" `
+                -ValidityInMonths 12 `
+                -RenewAtNumberOfDaysBeforeExpiry 30 `
+                -KeyType RSA `
+                -KeySize 4096 `
+                -ErrorAction Stop
+            
+            Add-AzKeyVaultCertificate -VaultName $vault1Name -Name "CompliantCert" `
+                -CertificatePolicy $certPolicy -ErrorAction Stop | Out-Null
+            Write-Host "    ✓ Certificate created (self-signed, 12-month validity, RSA-4096)" -ForegroundColor Green
+            Write-Host "       (For production: configure integrated CA like DigiCert or GlobalSign)" -ForegroundColor Gray
+        } catch {
+            Write-Host "    ⚠️  Failed to create certificate: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        
         $createdVaults += $vault1
         $trackingData.CompliantVaults += @{
             Name = $vault1Name
@@ -198,6 +220,7 @@ if ($CreateCompliant) {
             Objects = @{
                 Secrets = 1
                 Keys = 1
+                Certificates = 1
             }
         }
     } catch {
@@ -238,12 +261,48 @@ if ($CreateCompliant) {
         Write-Host "    ✓ RBAC authorization: ENABLED" -ForegroundColor Green
         Write-Host "    ✓ Firewall: CONFIGURED ($myIp)" -ForegroundColor Green
         
+        # Enable diagnostic logging (requires Log Analytics workspace)
+        Write-Host "    ⏳ Configuring diagnostic logging..." -ForegroundColor Gray
+        try {
+            # Check for existing Log Analytics workspace or create one
+            $workspaceName = "law-keyvault-test-$uniqueSuffix"
+            $workspace = Get-AzOperationalInsightsWorkspace -ResourceGroupName $ResourceGroupName -Name $workspaceName -ErrorAction SilentlyContinue
+            
+            if (-not $workspace) {
+                Write-Host "       Creating Log Analytics workspace: $workspaceName" -ForegroundColor Gray
+                $workspace = New-AzOperationalInsightsWorkspace `
+                    -ResourceGroupName $ResourceGroupName `
+                    -Name $workspaceName `
+                    -Location $Location `
+                    -Sku "PerGB2018" `
+                    -ErrorAction Stop
+                Start-Sleep -Seconds 5
+            } else {
+                Write-Host "       Using existing workspace: $workspaceName" -ForegroundColor Gray
+            }
+            
+            # Enable diagnostics for vault2
+            $diagSettings = @{
+                Name = "keyvault-diagnostics"
+                ResourceId = $vault2.ResourceId
+                WorkspaceId = $workspace.ResourceId
+                Enabled = $true
+                Category = @("AuditEvent", "AllMetrics")
+            }
+            
+            Set-AzDiagnosticSetting @diagSettings -ErrorAction Stop | Out-Null
+            Write-Host "    ✓ Diagnostic logging: ENABLED (Log Analytics workspace)" -ForegroundColor Green
+        } catch {
+            Write-Host "    ⚠️  Failed to enable diagnostic logging: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "       (This is optional - continuing without logging)" -ForegroundColor Gray
+        }
+        
         $createdVaults += $vault2
         $trackingData.CompliantVaults += @{
             Name = $vault2Name
             ResourceId = $vault2.ResourceId
             Purpose = "RBAC with Firewall Rules"
-            Features = @("SoftDelete", "PurgeProtection", "RBAC", "Firewall")
+            Features = @("SoftDelete", "PurgeProtection", "RBAC", "Firewall", "DiagnosticLogging")
         }
     } catch {
         Write-Host "    ✗ Failed to create vault: $_" -ForegroundColor Red
@@ -349,11 +408,37 @@ if ($CreateNonCompliant) {
         }
         
         try {
-            $key4 = Add-AzKeyVaultKey -VaultName $vault4Name -Name "WeakKey" `
+            $key4 = Add-AzKeyVaultKey -VaultName $vault4Name -Name "WeakRSAKey" `
                 -Destination Software -KeyType RSA -Size 2048 -ErrorAction Stop
-            Write-Host "    ✗ RSA-2048 key created WITHOUT expiration (minimum allowed)" -ForegroundColor Red
+            Write-Host "    ✗ RSA-2048 key created WITHOUT expiration (weak key size)" -ForegroundColor Red
         } catch {
-            Write-Host "    ✗ Failed to create key: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "    ✗ Failed to create RSA key: $($_.Exception.Message)" -ForegroundColor Red
+        }
+        
+        # Create weak EC key with non-recommended curve
+        try {
+            $keyEC = Add-AzKeyVaultKey -VaultName $vault4Name -Name "WeakECKey" `
+                -Destination Software -KeyType EC -CurveName secp256k1 -ErrorAction Stop
+            Write-Host "    ✗ EC key created with weak curve (secp256k1)" -ForegroundColor Red
+        } catch {
+            Write-Host "    ⚠️  Failed to create EC key (curve may not be supported): $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        
+        # Create self-signed certificate (non-integrated CA) with long validity
+        try {
+            $selfSignedPolicy = New-AzKeyVaultCertificatePolicy `
+                -SubjectName "CN=selfsigned.test.local" `
+                -IssuerName "Self" `
+                -ValidityInMonths 25 `
+                -KeyType RSA `
+                -KeySize 2048 `
+                -ErrorAction Stop
+            
+            Add-AzKeyVaultCertificate -VaultName $vault4Name -Name "SelfSignedCert" `
+                -CertificatePolicy $selfSignedPolicy -ErrorAction Stop | Out-Null
+            Write-Host "    ✗ Self-signed certificate created (non-integrated CA, 25-month validity, RSA-2048)" -ForegroundColor Red
+        } catch {
+            Write-Host "    ✗ Failed to create certificate: $($_.Exception.Message)" -ForegroundColor Red
         }
         
         $createdVaults += $vault4
@@ -361,8 +446,8 @@ if ($CreateNonCompliant) {
             Name = $vault4Name
             ResourceId = $vault4.ResourceId
             Purpose = "Public Access + Weak Cryptography"
-            Violations = @("PublicAccess", "NoPurgeProtection", "NoSecretExpiration", "NoKeyExpiration")
-            Objects = @{ Secrets = 1; Keys = 1 }
+            Violations = @("PublicAccess", "NoPurgeProtection", "NoSecretExpiration", "NoKeyExpiration", "WeakRSAKey", "WeakECCurve", "SelfSignedCert", "LongCertValidity")
+            Objects = @{ Secrets = 1; Keys = 2; Certificates = 1 }
         }
     } catch {
         Write-Host "    ✗ Failed to create vault: $_" -ForegroundColor Red

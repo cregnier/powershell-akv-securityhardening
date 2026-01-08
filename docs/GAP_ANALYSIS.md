@@ -1,5 +1,11 @@
 # Test Matrix Gap Analysis
 
+**Last Updated:** January 8, 2026
+
+**Note:** As of January 8, 2026, all reports now include friendly policy names instead of GUIDs. See [COMPLIANCE_REPORT_ENHANCEMENT.md](COMPLIANCE_REPORT_ENHANCEMENT.md).
+
+---
+
 ## Current State: 14 Tests Implemented vs 17 Required
 
 ### ✅ IMPLEMENTED Tests (14 total)

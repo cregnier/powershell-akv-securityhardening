@@ -1,5 +1,11 @@
 # Exported Artifacts
 
+**Last Updated:** January 8, 2026
+
+**Note (2026-01-08):** All newly generated artifacts now include friendly policy names, evaluation explanations, and comprehensive metadata footers. See [COMPLIANCE_REPORT_ENHANCEMENT.md](COMPLIANCE_REPORT_ENHANCEMENT.md) for details.
+
+---
+
 The following artifacts were created by the test run and collected here for review.
 
 - **Report (latest):** AzurePolicy-KeyVault-TestReport-20260105-124607.html — original path: c:\Temp\AzurePolicy-KeyVault-TestReport-20260105-124607.html

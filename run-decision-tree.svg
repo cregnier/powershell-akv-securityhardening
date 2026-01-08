@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <style>
+    .box { fill:#f4f6fb; stroke:#667eea; stroke-width:2; rx:8; }
+    .box-crit { fill:#fff5f5; stroke:#d9534f; }
+    .text { font-family: Segoe UI, Arial, sans-serif; font-size:14px; fill:#222; }
+    .title { font-size:18px; font-weight:700; }
+    .scriptName { font-size:22px; font-weight:700; }
+    .scriptName.blue { fill:#002b63; }
+    .scriptName.red { fill:#b21f2d; }
+    .params { font-size:13px; fill:#333; }
+    .arrow { stroke:#444; stroke-width:2; fill:none; marker-end:url(#arrowhead);} 
+  </style>
+
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#444" />
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="600" y="32" text-anchor="middle" class="text title">Run Decision Tree</text>
+
+  <!-- Start -->
+  <rect x="460" y="60" width="280" height="48" class="box" />
+  <text x="600" y="92" text-anchor="middle" class="text">Start: Run locally?</text>
+
+  <!-- Branch: No -> CI Automated -->
+  <rect x="80" y="170" width="360" height="70" class="box" />
+  <text x="260" y="200" class="text">No (CI / Automated)</text>
+  <text x="260" y="220" class="text scriptName red" text-anchor="middle">Run-FullWorkflowTest</text>
+  <text x="260" y="240" class="text params" text-anchor="middle">SkipReset optional — Calls: Create → Run-CompleteWorkflow → Reset</text>
+
+  <!-- Branch: Yes -> Manual -->
+  <rect x="760" y="170" width="360" height="70" class="box" />
+  <text x="940" y="200" class="text">Yes (Manual)</text>
+  <text x="940" y="220" class="text params">Choose: Interactive or Single Run</text>
+
+  <!-- Arrows from start -->
+  <path d="M520 108 L440 160" class="arrow" />
+  <path d="M680 108 L820 160" class="arrow" />
+
+  <!-- Interactive -> Foreground -->
+  <rect x="720" y="280" width="440" height="90" class="box" />
+  <text x="940" y="310" class="text params">Interactive / Step-through</text>
+  <text x="940" y="335" class="text scriptName red" text-anchor="middle">Run-ForegroundWorkflowTest</text>
+  <text x="940" y="355" class="text params" text-anchor="middle">interactive prompts: Create? Reuse? Cleanup?</text>
+
+  <!-- Single run -> Run-CompleteWorkflow -->
+  <rect x="720" y="400" width="440" height="90" class="box" />
+  <text x="940" y="430" class="text params">Single run against existing env</text>
+  <text x="940" y="455" class="text scriptName blue" text-anchor="middle">Run-CompleteWorkflow</text>
+  <text x="940" y="475" class="text params" text-anchor="middle">Flags: -DevTestMode (test only), -AutoRemediate, -SkipPolicyDeployment</text>
+
+  <!-- Arrows from Manual options -->
+  <path d="M820 240 L820 280" class="arrow" />
+  <path d="M820 240 L820 400" class="arrow" />
+
+  <!-- Left CI flow detail boxes -->
+  <rect x="60" y="280" width="360" height="60" class="box" />
+  <text x="240" y="305" class="text scriptName blue" text-anchor="middle">Create-PolicyTestEnvironment</text>
+  <text x="240" y="325" class="text params" text-anchor="middle">SubscriptionId, ResourceGroupName, Location, CreateCompliant, CreateNonCompliant</text>
+
+  <rect x="60" y="360" width="360" height="60" class="box" />
+  <text x="240" y="385" class="text scriptName blue" text-anchor="middle">Run-CompleteWorkflow</text>
+  <text x="240" y="405" class="text params" text-anchor="middle">core workflow — produces artifacts (manifest, JSON/HTML/CSV)</text>
+
+  <rect x="60" y="440" width="360" height="60" class="box box-crit" />
+  <text x="240" y="465" class="text scriptName red" text-anchor="middle">Reset-PolicyTestEnvironment</text>
+  <text x="240" y="485" class="text params" text-anchor="middle">cleanup / destructive — use with `WhatIf` / Confirm</text>
+
+  <!-- Arrows connecting left flow -->
+  <path d="M260 240 L260 280" class="arrow" />
+  <path d="M260 340 L260 360" class="arrow" />
+  <path d="M260 420 L260 440" class="arrow" />
+
+  <!-- Notes block bottom center -->
+  <rect x="200" y="560" width="800" height="220" class="box" />
+  <text x="600" y="590" class="text" text-anchor="middle">Notes:</text>
+  <text x="600" y="615" class="text" text-anchor="middle">- Use `-DevTestMode` only in test/dummy environments (makes breaking changes).</text>
+  <text x="600" y="635" class="text" text-anchor="middle">- For CI: prefer `Run-FullWorkflowTest.ps1` (-SkipReset if reusing env).</text>
+  <text x="600" y="655" class="text" text-anchor="middle">- For manual demos: prefer `Run-ForegroundWorkflowTest.ps1` (interactive prompts).</text>
+  <text x="600" y="675" class="text" text-anchor="middle">- `Run-CompleteWorkflow.ps1` now accepts `-InvokedBy` and annotates artifacts.</text>
+
+</svg>

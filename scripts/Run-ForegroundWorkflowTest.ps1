@@ -224,9 +224,95 @@ Write-Host "⏱️  This may take 5-10 minutes...`n" -ForegroundColor Yellow
 $WorkflowRunId = (Get-Date -Format "yyyyMMdd-HHmmss")
 $runStart = Get-Date
 
-# Invoke the complete workflow with DevTestMode (full auto-remediation) and skip compliance wait for fast testing
-# Invoke the complete workflow with DevTestMode (full auto-remediation) and skip compliance wait for fast testing
-$runResult = & "$PSScriptRoot\Run-CompleteWorkflow.ps1" -ResourceGroupName $rgName -WorkflowRunId $WorkflowRunId -DevTestMode -SkipComplianceWait
+# Helper: Poll and re-run Regenerate-ComplianceReport until compliance data appears
+function Poll-RegenerateCompliance {
+    param(
+        [Parameter(Mandatory=$true)][string]$WorkflowRunId,
+        [Parameter(Mandatory=$false)][string]$ResourceGroupName,
+        [int]$IntervalSeconds = 60,
+        [int]$MaxAttempts = 10,
+        [switch]$AutoOpenHtml
+    )
+
+    $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $jsonDir = Join-Path (Split-Path -Parent $scriptRoot) "artifacts\json"
+    $complianceJson = Join-Path $jsonDir "compliance-report-$WorkflowRunId.json"
+
+    for ($i = 1; $i -le $MaxAttempts; $i++) {
+        Write-Host ("Attempt ${i}/${MaxAttempts}: regenerating compliance report...") -ForegroundColor Cyan
+        & "$PSScriptRoot\Regenerate-ComplianceReport.ps1" -WorkflowRunId $WorkflowRunId -ResourceGroupName $ResourceGroupName
+
+        # Give a moment for files to flush
+        Start-Sleep -Seconds 2
+
+        if (Test-Path $complianceJson) {
+            try {
+                $report = Get-Content $complianceJson -ErrorAction Stop | ConvertFrom-Json
+                if ($report.totalEvaluations -gt 0) {
+                    Write-Host "✓ Compliance data found: $($report.totalEvaluations) evaluations." -ForegroundColor Green
+                    if ($AutoOpenHtml) {
+                        $htmlPath = Join-Path (Split-Path -Parent $scriptRoot) "artifacts\html" "compliance-report-$WorkflowRunId.html"
+                        if (Test-Path $htmlPath) { Start-Process $htmlPath }
+                    }
+                    return $true
+                } else {
+                    Write-Host "  Still zero evaluations in report." -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "  Warning: failed to parse JSON: $_" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  Compliance JSON not found yet." -ForegroundColor Yellow
+        }
+
+        if ($i -lt $MaxAttempts) {
+            Write-Host "Waiting $IntervalSeconds seconds before retry..." -ForegroundColor Gray
+            Start-Sleep -Seconds $IntervalSeconds
+        }
+    }
+
+    Write-Host "⚠️  Reached max attempts ($MaxAttempts) without compliance evaluations." -ForegroundColor Yellow
+    return $false
+}
+
+# Ask user: DevTest mode or Production mode (Production is the safe default)
+Write-Host "`n═══════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host " REMEDIATION MODE SELECTION" -ForegroundColor Cyan
+Write-Host "═══════════════════════════════════════════════════════════════════`n" -ForegroundColor Cyan
+
+Write-Host "Select remediation mode:" -ForegroundColor Yellow
+Write-Host "`n  [P] Production Mode - SAFE (Default - Recommended)" -ForegroundColor Green
+Write-Host "      ✅ Auto-fixes: Soft delete + purge protection (non-breaking)" -ForegroundColor Gray
+Write-Host "      ⚠️  Manual review: RBAC, firewall, logging, expiration, certificates" -ForegroundColor Gray
+Write-Host "      💡 Safe for production - will NOT break existing applications" -ForegroundColor Cyan
+Write-Host "`n  [D] DevTest Mode - AGGRESSIVE (Test environments only)" -ForegroundColor Yellow
+Write-Host "      ⚠️  Auto-fixes: ALL issues including breaking changes" -ForegroundColor Red
+Write-Host "      🔥 WARNING: May invalidate access policies, block network access" -ForegroundColor Red
+Write-Host "      ⛔ NOT safe for production environments" -ForegroundColor Red
+Write-Host ""
+Write-Host "Press ENTER for Production Mode (safe), or type D for DevTest Mode:" -ForegroundColor Cyan
+$modeChoice = Read-Host "Choice (P/D or ENTER for Production)"
+
+# Default to Production Mode (safe) if ENTER pressed or invalid input
+if ($modeChoice -match '^[Dd]') {
+    Write-Host "`n⚠️  DevTest Mode selected - AGGRESSIVE auto-remediation" -ForegroundColor Magenta
+    Write-Host "   This will make breaking changes suitable only for test environments" -ForegroundColor Yellow
+    Write-Host "   Access policies will be invalidated, network access may be blocked`n" -ForegroundColor Red
+    $runResult = & "$PSScriptRoot\Run-CompleteWorkflow.ps1" -ResourceGroupName $rgName -WorkflowRunId $WorkflowRunId -DevTestMode -SkipComplianceWait -InvokedBy 'Run-ForegroundWorkflowTest.ps1'
+} elseif ([string]::IsNullOrWhiteSpace($modeChoice) -or $modeChoice -match '^[Pp]') {
+    if ([string]::IsNullOrWhiteSpace($modeChoice)) {
+        Write-Host "`n✓ Production Mode selected (default) - SAFE" -ForegroundColor Green
+    } else {
+        Write-Host "`n✓ Production Mode selected - SAFE" -ForegroundColor Green
+    }
+    Write-Host "   Only non-breaking changes will be auto-fixed" -ForegroundColor Cyan
+    Write-Host "   Breaking changes will be flagged for manual review`n" -ForegroundColor Gray
+    $runResult = & "$PSScriptRoot\Run-CompleteWorkflow.ps1" -ResourceGroupName $rgName -WorkflowRunId $WorkflowRunId -AutoRemediate -SkipComplianceWait -InvokedBy 'Run-ForegroundWorkflowTest.ps1'
+} else {
+    Write-Host "`n⚠️  Invalid choice '$modeChoice' - defaulting to Production Mode (safe)" -ForegroundColor Yellow
+    Write-Host "   Only non-breaking changes will be auto-fixed`n" -ForegroundColor Gray
+    $runResult = & "$PSScriptRoot\Run-CompleteWorkflow.ps1" -ResourceGroupName $rgName -WorkflowRunId $WorkflowRunId -AutoRemediate -SkipComplianceWait -InvokedBy 'Run-ForegroundWorkflowTest.ps1'
+}
 
 $runEnd = Get-Date
 
@@ -277,13 +363,16 @@ if (Test-Path $complianceReportPath) {
         
         if ($choice -eq 'W' -or $choice -eq 'w') {
             Write-Host "`n⏳ Querying Azure Policy for compliance data..." -ForegroundColor Cyan
-            Write-Host "This will re-generate the compliance report with current data.`n" -ForegroundColor Gray
-            
-            # Re-run just the compliance report step
-            & "$PSScriptRoot\Regenerate-ComplianceReport.ps1" -WorkflowRunId $WorkflowRunId -ResourceGroupName $rgName
-            
-            Write-Host "`n✓ Compliance report updated. Check the HTML file." -ForegroundColor Green
-            Write-Host "If still showing 0 evaluations, try option [L] to keep resources and check later." -ForegroundColor Gray
+            Write-Host "This will re-generate the compliance report with current data and optionally poll until data is available.`n" -ForegroundColor Gray
+
+            # Call the poll helper (default: 60s interval x 10 attempts = up to ~10 minutes)
+            $pollResult = Poll-RegenerateCompliance -WorkflowRunId $WorkflowRunId -ResourceGroupName $rgName -IntervalSeconds 60 -MaxAttempts 10 -AutoOpenHtml
+
+            if ($pollResult) {
+                Write-Host "`n✓ Compliance report updated and contains evaluations. Check the HTML file." -ForegroundColor Green
+            } else {
+                Write-Host "`n⚠ Compliance data still not available after polling. Consider waiting longer and re-running the regenerate script later." -ForegroundColor Yellow
+            }
         }
         elseif ($choice -eq 'L' -or $choice -eq 'l') {
             Write-Host "`n📝 To re-generate the compliance report later, run:" -ForegroundColor Cyan
@@ -298,80 +387,13 @@ if (Test-Path $complianceReportPath) {
     }
 }
 
-# Pause for user
-Write-Host "`nPress ENTER to continue to Step 4 (Reset/Cleanup)..." -ForegroundColor Yellow
-Read-Host
-
-# STEP 4: Reset/cleanup environment
-Write-Section "STEP 4: CLEANUP - RUNNING RESET SCRIPT"
-
-Write-Host "Removing test resources, policies, and artifacts...`n" -ForegroundColor Cyan
-& "$PSScriptRoot\Reset-PolicyTestEnvironment.ps1" `
-    -ResourceGroupName $rgName `
-    -RemovePolicyAssignments `
-    -WhatIf:$false `
-    -Confirm:$false
-
-Write-Host "`n✓ Reset/cleanup completed" -ForegroundColor Green
-
-# Pause for user
-Write-Host "`nPress ENTER to continue to Step 5 (Verify Cleanup)..." -ForegroundColor Yellow
-Read-Host
-
-# STEP 5: Verify cleanup
-Write-Section "STEP 5: VERIFYING CLEANUP COMPLETED"
-
-Write-Host "Checking that resources were removed...`n" -ForegroundColor Cyan
-
-# Check resource group
-$rgAfter = Get-AzResourceGroup -Name $rgName -ErrorAction SilentlyContinue
-if ($rgAfter) {
-    $resources = Get-AzResource -ResourceGroupName $rgName -ErrorAction SilentlyContinue
-    if ($resources.Count -eq 0) {
-        Write-Host "✓ Resource group exists but is EMPTY" -ForegroundColor Green
-    } else {
-        Write-Host "⚠️  Resource group still contains $($resources.Count) resources:" -ForegroundColor Yellow
-        $resources | Select-Object -First 10 | ForEach-Object {
-            Write-Host "  • $($_.Name) ($($_.ResourceType))" -ForegroundColor White
-        }
-    }
-} else {
-    Write-Host "✓ Resource group REMOVED completely" -ForegroundColor Green
-}
-
-# Check Key Vaults
-$vaultsAfter = Get-AzKeyVault -ResourceGroupName $rgName -ErrorAction SilentlyContinue
-if ($vaultsAfter) {
-    Write-Host "⚠️  $($vaultsAfter.Count) Key Vaults still exist" -ForegroundColor Yellow
-} else {
-    Write-Host "✓ All Key Vaults removed" -ForegroundColor Green
-}
-
-# Check soft-deleted vaults
-Write-Host "`nChecking soft-deleted Key Vaults..." -ForegroundColor Cyan
-$softDeleted = Get-AzKeyVault -InRemovedState -ErrorAction SilentlyContinue | 
-    Where-Object { $_.VaultName -like "*baseline*" -or $_.VaultName -like "kv-*-oizuglif" }
-
-if ($softDeleted) {
-    Write-Host "ℹ️  Found $($softDeleted.Count) soft-deleted vaults:" -ForegroundColor Cyan
-    $softDeleted | ForEach-Object {
-        Write-Host "  • $($_.VaultName) (purge date: $($_.ScheduledPurgeDate))" -ForegroundColor White
-    }
-    Write-Host "`n  These will auto-purge after retention period" -ForegroundColor Gray
-} else {
-    Write-Host "✓ No soft-deleted vaults" -ForegroundColor Green
-}
-
-# Check policies
-Write-Host "`nChecking Azure Policy assignments..." -ForegroundColor Cyan
-$policiesAfter = Get-AzPolicyAssignment -Scope "/subscriptions/$($ctx.Subscription.Id)" -ErrorAction SilentlyContinue | 
-    Where-Object { $_.Properties.DisplayName -like "*Key*Vault*" -or $_.Name -like "*keyvault*" }
-
-if ($policiesAfter) {
-    Write-Host "⚠️  $($policiesAfter.Count) Key Vault policies still assigned" -ForegroundColor Yellow
-} else {
-    Write-Host "✓ All Key Vault policies removed" -ForegroundColor Green
-}
+# ===================================================================
+# OLD STEPS 4 & 5 (Automatic Cleanup) REMOVED
+# ===================================================================
+# Bug fix: These steps were deleting resources BEFORE asking the user
+# if they wanted to keep them for compliance polling. The cleanup is
+# now handled later with a user prompt (see CLEANUP AZURE RESOURCES).
+# ===================================================================
 
 # Final summary
 Write-Section "WORKFLOW TEST COMPLETE" "Green"
@@ -387,7 +409,7 @@ if ($createNew) {
 Write-Host "  2. ✓ Environment verified" -ForegroundColor Green
 Write-Host "  3. ✓ Workflow executed (baseline, policies, remediation, reports)" -ForegroundColor Green
 Write-Host "     ✓ Policy compliance validation" -ForegroundColor Green
-Write-Host "  4. ✓ Cleanup verification completed`n" -ForegroundColor Green
+Write-Host "`n" -ForegroundColor Green
 
 Write-Host "Policy Coverage Validated:" -ForegroundColor Cyan
 Write-Host "  ✓ Key Vault Service Security (network rules, public access)" -ForegroundColor Green
@@ -448,7 +470,7 @@ Write-Host "══════════════════════�
 
 Write-Host "💡 If you want to wait for Azure Policy compliance data to populate," -ForegroundColor Cyan
 Write-Host "   choose [N] to keep resources, then re-run the compliance report:" -ForegroundColor Cyan
-Write-Host "   .\scripts\Regenerate-ComplianceReport.ps1 -WorkflowRunId $WorkflowRunId`n" -ForegroundColor White
+Write-Host "   .\scripts\Regenerate-ComplianceReport.ps1 -WorkflowRunId $WorkflowRunId -ResourceGroupName $rgName`n" -ForegroundColor White
 
 Write-Host "Do you want to clean up the Azure resources created during this test?" -ForegroundColor Yellow
 Write-Host "  [Y] Yes - Remove resource group and all policy assignments" -ForegroundColor White
@@ -472,6 +494,22 @@ if ($cleanupChoice -match '^[Yy]') {
     Write-Host "`n⚠️  Azure resources have been kept" -ForegroundColor Yellow
     Write-Host "  Resource Group: $rgName" -ForegroundColor White
     Write-Host "  Location: $location`n" -ForegroundColor White
+
+    # Offer to poll for compliance now while resources are kept
+    Write-Host "Would you like to poll for Azure Policy compliance now while resources are kept? (Y/N)" -ForegroundColor Cyan
+    $keepChoice = Read-Host "Enter your choice (Y/N)"
+    if ($keepChoice -match '^[Yy]') {
+        Write-Host "Starting polling for compliance (attempts: 10, interval: 60s)..." -ForegroundColor Cyan
+        $pollResult = Poll-RegenerateCompliance -WorkflowRunId $WorkflowRunId -ResourceGroupName $rgName -IntervalSeconds 60 -MaxAttempts 10 -AutoOpenHtml
+        if ($pollResult) {
+            Write-Host "Compliance data available after polling." -ForegroundColor Green
+        } else {
+            Write-Host "Polling finished without finding compliance evaluations. You can re-run Regenerate-ComplianceReport.ps1 later." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "Skipping polling; resources will be kept for manual inspection." -ForegroundColor Gray
+    }
+
     Write-Host "To manually cleanup later, run:" -ForegroundColor Cyan
     Write-Host "  .\Reset-PolicyTestEnvironment.ps1 -ResourceGroupName '$rgName' -RemovePolicyAssignments`n" -ForegroundColor Gray
     Write-Host "⚠️  Note: Keeping resources may incur Azure costs" -ForegroundColor Yellow

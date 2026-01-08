@@ -29,12 +29,16 @@
     Shows what would be remediated without making changes
 
 .PARAMETER AutoRemediate
-    Automatically fixes safe issues (soft delete, purge protection)
+    PRODUCTION MODE (SAFE - Recommended): Automatically fixes safe, non-breaking issues only.
+    Auto-fixes: Soft delete, purge protection
+    Manual review: RBAC migration, firewall, logging, expiration (breaking changes)
+    This is the recommended default for production environments.
 
 .PARAMETER DevTestMode
-    DEV/TEST MODE: Auto-fixes ALL issues including risky changes (RBAC, firewall, logging, expiration).
-    WARNING: This mode makes breaking changes. Only use in test environments!
-    In production, use -AutoRemediate instead (safe fixes only).
+    DEVTEST MODE (AGGRESSIVE - Test environments only): Auto-fixes ALL issues including breaking changes.
+    WARNING: This mode invalidates access policies, blocks network access, and may break applications.
+    Only use in development/test environments where disruption is acceptable.
+    For production, use -AutoRemediate instead (safe mode).
 
 .EXAMPLE
     .\Remediate-ComplianceIssues.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb" -WhatIf

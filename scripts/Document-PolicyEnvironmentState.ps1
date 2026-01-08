@@ -87,6 +87,12 @@ $stateReport = @{
     ResourceGroup = $ResourceGroupName
     VaultCount = $vaults.Count
     Vaults = @()
+    Metadata = @{
+        generatedBy = "Document-PolicyEnvironmentState.ps1"
+        command = ".\Document-PolicyEnvironmentState.ps1 -ResourceGroupName $ResourceGroupName -OutputPath $OutputPath$(if ($IncludeCompliance) { ' -IncludeCompliance' })"
+        timestamp = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        includeCompliance = [bool]$IncludeCompliance
+    }
 }
 
 foreach ($vault in $vaults) {

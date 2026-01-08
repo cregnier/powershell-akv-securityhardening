@@ -1,5 +1,11 @@
 # Implementation Summary: Enhanced Azure Policy Testing Framework
 
+**Last Updated:** January 8, 2026
+
+**Latest Enhancements (2026-01-08):** All compliance and workflow reports now include friendly policy names, evaluation explanations, and comprehensive metadata footers. See [COMPLIANCE_REPORT_ENHANCEMENT.md](COMPLIANCE_REPORT_ENHANCEMENT.md) for details.
+
+---
+
 ## ✅ COMPLETED WORK
 
 ### 1. Fixed ObjectId Error (MSA Account Compatibility)

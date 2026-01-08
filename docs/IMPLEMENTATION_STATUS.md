@@ -1,7 +1,34 @@
 # Azure Policy Key Vault Test Suite - Implementation Status
-**Last Updated:** 2026-01-06 10:27 AM  
+**Last Updated:** 2026-01-08  
 **Test Report:** AzurePolicy-KeyVault-TestReport-20260106-102723.html  
 **Status:** ✅ PRODUCTION READY - 25/39 executions passed (64%)
+
+---
+
+## Recent Enhancements (2026-01-08)
+
+### Report Quality Improvements
+All compliance and workflow reports now include:
+
+1. **Friendly Policy Names**: GUID policy IDs replaced with human-readable names
+   - `a6abeaec-4d90-4a02-805f-6b26c4d3ffd9` → "Azure Key Vaults should use private link"
+   - `cf820ca0-f99e-4f3e-84fb-66e913812d21` → "Azure Key Vault should have diagnostic logging enabled"
+
+2. **Evaluation Count Explanation**: Reports now explain why Azure Policy shows more evaluations than vaults
+   - Vault-level evaluations + secret evaluations + key evaluations + certificate evaluations
+   - Example: 5 vaults with 2 secrets each = 15 total evaluations
+
+3. **Comprehensive Metadata Footers**: All generated reports (HTML/JSON/CSV) include:
+   - Script name that generated the report
+   - Exact command used
+   - Mode (DevTest vs Production)
+   - Generation timestamp
+   - Workflow Run ID
+
+### Updated Scripts
+- ✅ `Regenerate-ComplianceReport.ps1`: Now adds friendly names, evaluation explanations, and metadata
+- ✅ `Run-CompleteWorkflow.ps1`: All HTML reports include footers with generation metadata
+- ✅ `Document-PolicyEnvironmentState.ps1`: JSON output includes metadata section
 
 ---
 

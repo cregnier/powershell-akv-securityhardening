@@ -1,5 +1,11 @@
 # Secrets Guidance (Draft)
 
+**Last Updated:** January 8, 2026
+
+**Note (2026-01-08):** All compliance reports now include friendly policy names and comprehensive metadata. See [COMPLIANCE_REPORT_ENHANCEMENT.md](COMPLIANCE_REPORT_ENHANCEMENT.md) for details.
+
+---
+
 - **Access model:** Prefer **RBAC** over Access Policies for new vaults; RBAC simplifies management and integrates with Azure AD. For existing vaults with many access policies, plan staged migration and communicate to app owners.
 - **Managed identities:** Use platform-managed identities for services that need Key Vault secrets/keys; avoid long-lived service principals when possible.
 - **Secret rotation:** Enforce short-lived secrets and automated rotation. Use Azure Key Vault rotation features or implement Automation/Functions to rotate secrets and update consumers.

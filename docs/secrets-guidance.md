@@ -1,8 +1,10 @@
 # Azure Key Vault Secrets & Identity Management Guidance
 
-**Document Version:** 1.0  
-**Last Updated:** 2026-01-06  
+**Document Version:** 1.1  
+**Last Updated:** 2026-01-08  
 **Audience:** Security teams, DevOps engineers, application developers
+
+**Latest Updates (2026-01-08):** All compliance reports referenced in this document now include friendly policy names instead of GUIDs, making policy violations easier to understand.
 
 ---
 

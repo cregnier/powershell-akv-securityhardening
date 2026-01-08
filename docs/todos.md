@@ -1,8 +1,206 @@
 ﻿# Azure Policy Key Vault Test Suite - Outstanding Tasks
-**Date:** 2026-01-06
-**Status:** Active Development
+**Date:** 2026-01-08 (Updated)
+**Status:** Active Development - Policy Gap Implementation Phase
 
 This file tracks outstanding tasks and improvements needed for the project.
+
+---
+
+## 🎯 CRITICAL: POLICY GAP IMPLEMENTATION (2026-01-08)
+**See detailed plan:** `docs/POLICY_GAP_IMPLEMENTATION_PLAN.md`
+
+**Summary:** Framework currently implements 16 of 46 total Azure Key Vault policies (35% coverage). Implementing 20 additional non-preview, non-Managed HSM policies to reach 36 total (78% coverage).
+
+### Phase 1: Certificate Lifecycle & Advanced Policies (5 policies)
+**Priority:** HIGH | **Estimated:** 3-4 hours
+
+- [ ] Implement "Certificates should have the specified maximum validity period"
+  - [ ] Add `Test-CertificateMaxValidityPolicy` to Test-AzurePolicyKeyVault.ps1
+  - [ ] Update Create-PolicyTestEnvironment.ps1 to create long-validity cert
+  - [ ] Add policy assignment to Assign-AuditPolicies.ps1 and Assign-DenyPolicies.ps1
+  - [ ] Update test matrix documentation
+
+- [ ] Implement "Certificates should have the specified lifetime action triggers"
+  - [ ] Add `Test-CertificateLifetimeActionPolicy` function
+  - [ ] Test auto-renewal trigger configuration
+  - [ ] Add policy assignments
+
+- [ ] Implement "Certificates should not expire within the specified number of days"
+  - [ ] Add `Test-CertificateExpirationWarningPolicy` function
+  - [ ] Create near-expiry certificates in test environment
+  - [ ] Add policy assignments
+
+- [ ] Implement "Certificates should be issued by one of the specified non-integrated certificate authorities" (Multi-CA variant)
+  - [ ] Add `Test-CertificateMultipleCAPolicy` function
+  - [ ] Test CA allowlist functionality
+  - [ ] Add policy assignments
+
+- [ ] Implement "Secrets should have content type set"
+  - [ ] Add `Test-SecretContentTypePolicy` function
+  - [ ] Update test environment to create secrets with/without content type
+  - [ ] Add policy assignments
+
+### Phase 2: Key & Secret Lifecycle Policies (6 policies)
+**Priority:** HIGH | **Estimated:** 4-5 hours
+
+- [ ] Implement "Keys should have the specified maximum validity period"
+  - [ ] Add `Test-KeyMaxValidityPolicy` function
+  - [ ] Create keys with custom validity periods (400 days vs 365 limit)
+  - [ ] Add policy assignments
+
+- [ ] Implement "Keys should have more than the specified number of days before expiration"
+  - [ ] Add `Test-KeyExpirationWarningPolicy` function
+  - [ ] Create near-expiry keys in test environment
+  - [ ] Add policy assignments
+
+- [ ] Implement "Keys should not be active for longer than the specified number of days"
+  - [ ] Add `Test-KeyMaxActivePolicy` function
+  - [ ] Calculate key active duration validation
+  - [ ] Add policy assignments
+
+- [ ] Implement "Secrets should have the specified maximum validity period"
+  - [ ] Add `Test-SecretMaxValidityPolicy` function
+  - [ ] Create secrets with custom validity periods
+  - [ ] Add policy assignments
+
+- [ ] Implement "Secrets should have more than the specified number of days before expiration"
+  - [ ] Add `Test-SecretExpirationWarningPolicy` function
+  - [ ] Create near-expiry secrets
+  - [ ] Add policy assignments
+
+- [ ] Implement "Secrets should not be active for longer than the specified number of days"
+  - [ ] Add `Test-SecretMaxActivePolicy` function
+  - [ ] Calculate secret active duration validation
+  - [ ] Add policy assignments
+
+### Phase 3: Advanced Key Features (2 policies)
+**Priority:** MEDIUM | **Estimated:** 2-3 hours
+
+- [ ] Implement "Keys should be backed by a hardware security module (HSM)"
+  - [ ] Add `Test-KeyHSMBackedPolicy` function
+  - [ ] Create both software and HSM keys (requires Premium SKU)
+  - [ ] Add policy assignments
+  - [ ] Document Premium SKU requirement
+
+- [ ] Implement "Keys should have a rotation policy ensuring rotation is scheduled"
+  - [ ] Add `Test-KeyRotationPolicyPolicy` function
+  - [ ] Configure automatic key rotation
+  - [ ] Add policy assignments
+
+### Phase 4: Network Security (1 policy)
+**Priority:** MEDIUM | **Estimated:** 1-2 hours
+
+- [ ] Implement "Azure Key Vault should disable public network access"
+  - [ ] Add `Test-DisablePublicNetworkAccessPolicy` function
+  - [ ] Verify public network access settings
+  - [ ] Add policy assignments
+
+### Phase 5: DeployIfNotExists/Modify Policies (6 policies)
+**Priority:** LOW (Complex) | **Estimated:** 6-8 hours
+
+- [ ] Implement "Deploy - Configure diagnostic settings for Azure Key Vault to Log Analytics workspace"
+  - [ ] Add `Test-DeployDiagnosticSettingsLAWPolicy` function
+  - [ ] Create Log Analytics workspace in test environment
+  - [ ] Test automatic deployment
+  - [ ] Add policy assignments
+
+- [ ] Implement "Deploy Diagnostic Settings for Key Vault to Event Hub"
+  - [ ] Add `Test-DeployDiagnosticSettingsEventHubPolicy` function
+  - [ ] Create Event Hub in test environment
+  - [ ] Test automatic deployment
+  - [ ] Add policy assignments
+
+- [ ] Implement "Configure Azure Key Vaults with private endpoints"
+  - [ ] Add `Test-ConfigurePrivateEndpointsPolicy` function
+  - [ ] Create VNet/Subnet in test environment
+  - [ ] Test automatic private endpoint creation
+  - [ ] Add policy assignments
+
+- [ ] Implement "Configure Azure Key Vaults to use private DNS zones"
+  - [ ] Add `Test-ConfigurePrivateDNSPolicy` function
+  - [ ] Verify DNS zone creation/association
+  - [ ] Add policy assignments
+
+- [ ] Implement "Configure key vaults to enable firewall"
+  - [ ] Add `Test-ConfigureFirewallPolicy` function
+  - [ ] Test automatic firewall enablement
+  - [ ] Add policy assignments
+
+- [ ] Implement "Resource logs in Key Vault should be enabled"
+  - [ ] Add `Test-ResourceLogsEnabledPolicy` function
+  - [ ] Verify diagnostic logs configuration (different from existing policy)
+  - [ ] Add policy assignments
+
+### Documentation Updates for Policy Gap
+- [ ] Update README.md (16 → 36 policies)
+- [ ] Update AzurePolicy-KeyVault-TestMatrix.md with all 36 policies
+- [ ] Update IMPLEMENTATION_STATUS.md with new test results
+- [ ] Update GAP_ANALYSIS.md showing progress (16→36, deferred: 10 Managed HSM)
+- [ ] Update all reports to show friendly names for new policies
+
+### Deferred Policies (10 - Managed HSM + Preview)
+**Reason:** Managed HSM requires dedicated infrastructure, preview policies not production-ready
+- Deferred: All 10 Managed HSM policies (including preview variants)
+- Will revisit when Managed HSM infrastructure available
+
+---
+
+## ✅ COMPLETED (2026-01-08): Report Quality Enhancements
+
+**Issue 1: Friendly Policy Names** ✅ COMPLETED
+- GUID policy IDs replaced with human-readable names in all reports
+- Mappings: a6abeaec → "Azure Key Vaults should use private link", cf820ca0 → "Diagnostic logging enabled"
+- Applied to: Regenerate-ComplianceReport.ps1
+
+**Issue 2: Evaluation Count Confusion** ✅ COMPLETED
+- Added explanatory notes in CSV headers, JSON metadata, HTML descriptions
+- Clarifies why 5 vaults show 15 evaluations (vault + secrets + keys + certificates)
+- Applied to: All compliance report formats
+
+**Issue 3: Missing Report Metadata** ✅ COMPLETED
+- All generated reports (HTML/JSON/CSV) now include footer/metadata with:
+  - Script name, command used, mode, timestamp, workflow run ID
+- Applied to: Run-CompleteWorkflow.ps1, Regenerate-ComplianceReport.ps1, Document-PolicyEnvironmentState.ps1
+
+---
+
+## ✅ COMPLETED (2026-01-08): Compliance Refresh & DevTest Mode Fix
+
+**Issue 1: Compliance Report Refresh Mechanism** ✅ SOLVED
+- `Poll-RegenerateCompliance` helper already implemented in `Run-ForegroundWorkflowTest.ps1`
+- Polls every 60 seconds for up to 10 minutes until compliance data appears
+- Integrated into cleanup flow - offers polling when user keeps resources
+- See `docs/COMPLIANCE_REFRESH_GUIDE.md` for usage
+
+**Issue 2: DevTest Mode Hardcoded Bug** ✅ FIXED
+- Fixed critical bug where `-DevTestMode` was always passed to workflow
+- Added user prompt: [D] DevTest Mode or [P] Production Mode
+- Production mode: Safe fixes only (soft delete, purge protection)
+- DevTest mode: Full auto-fix (RBAC, firewall, logging, expiration)
+- Clear warnings about breaking changes in DevTest mode
+
+**Issue 3: Remediation Script Behavior** ✅ VERIFIED
+- Confirmed correct separation: Production (safe fixes) vs DevTest (all fixes)
+- Manual review items preserved in Production mode (RBAC, firewall, logging)
+
+**Documentation Created:**
+- `ISSUE_ANALYSIS_20260108.md` - Detailed root cause analysis
+- `docs/COMPLIANCE_REFRESH_GUIDE.md` - User guide with command reference and best practices
+
+**Remaining Gap: Test Resource Coverage**
+- Certificate policies not tested (NO certificates in test environment)
+- Weak key types not tested (need RSA-2048, weak EC curves)
+- Enhance `Create-PolicyTestEnvironment.ps1` to add these resources
+
+---
+
+## 🗓️ Tasks for Tomorrow (2026-01-08)
+**Purpose:** Short actionable work-items created during the interactive session.
+
+- [ ] Retro-annotate historical artifacts under `artifacts/` to embed `invokedBy`/`generatedBy` provenance for past runs.
+- [ ] Regenerate `run-decision-tree.svg` from `run-decision-tree.mmd` (apply final Mermaid styling) and produce a PNG export.
+- [ ] Backfill provenance into archived HTML/JSON/CSV artifacts where safe (non-destructive updates), write a script to perform this.
+- [ ] Commit and push repo changes (scripts + `master.md`) and create a short release note summarizing provenance, polling helper, and Mermaid updates.
 
 ---
 
@@ -218,6 +416,47 @@ All 9 user goals from initial requirements have been implemented and verified:
 ---
 
 **Last Updated:** 2026-01-06 22:05 PM
+
+---
+
+## 🔥 Backburner (Preserve for later)
+
+The following tasks are intentionally put on the back burner and recorded here so they are not lost. Do not work on them right now.
+
+- [ ] Retro-annotate historical artifacts under `artifacts/` to embed `invokedBy`/`generatedBy` provenance for past runs.
+- [ ] Regenerate `run-decision-tree.svg` from `run-decision-tree.mmd` (apply final Mermaid styling) and produce a PNG export.
+- [ ] Backfill provenance into archived HTML/JSON/CSV artifacts where safe (non-destructive updates), write a script to perform this (
+  `scripts/Backfill-Provenance.ps1`).
+- [ ] Commit and push repo changes (scripts + `master.md`) and create a short release note summarizing provenance, polling helper, and Mermaid updates.
+
+---
+
+## 🛠️ Current Focus: Compliance-Report Refresh & Cleanup Timeout
+
+Problem: Azure Policy compliance data can take 10–30 minutes to populate after policy assignment or remediation. To ensure accurate "after-remediation" compliance reports, the workflow needs a reliable mechanism to re-query policy state after a configurable delay and to avoid destroying resources before data populates.
+
+Planned short-term tasks (work on now):
+
+- [ ] Add an automated refresh mechanism to re-run `Regenerate-ComplianceReport.ps1` (or `Get-AzPolicyState`) 10-15 minutes after remediation completes. Options:
+  - Polling helper that calls `Start-AzPolicyComplianceScan` then invokes `Regenerate-ComplianceReport.ps1` until `totalEvaluations -gt 0` or timeout.
+  - Scheduled Task/Timer that runs once at T+10m to regenerate compliance artifacts.
+  - Use `Start-AzPolicyComplianceScan` to trigger re-evaluation and then poll `Get-AzPolicyState`.
+
+- [ ] Add a cleanup timeout/hold in `Run-ForegroundWorkflowTest.ps1` (and optionally `Run-CompleteWorkflow.ps1`) with a configurable wait window (default 20 minutes) before offering resource deletion. Provide options:
+  - `-SkipComplianceWait` to bypass (existing)
+  - `-ComplianceWaitMinutes <int>` parameter to set wait time
+  - Interactive prompt: "Keep resources and poll now for compliance? (Y)es/(N)o/(P)oll later"
+
+- [ ] Integrate `Poll-RegenerateCompliance` helper (already added to `Run-ForegroundWorkflowTest.ps1`) into the main workflow cleanup path so users who choose to keep resources can opt to poll immediately.
+
+- [ ] Add logging and a final compliance comparison step that records `totalEvaluations` and improvements in the comprehensive report.
+
+Acceptance criteria:
+
+- The workflow can trigger a compliance scan and regenerate the compliance report automatically ~10–20 minutes after remediation.
+- The interactive runner will not delete resources before the configured wait period elapses or the user explicitly opts out.
+- The comprehensive report includes before/after compliance counts with timestamps and an explicit note if Azure Policy data is still pending.
+
 
 **Requirement:** Analyze current state of policy implementation
 

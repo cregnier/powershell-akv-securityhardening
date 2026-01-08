@@ -1,7 +1,18 @@
 # Quick Start Guide - Azure Key Vault Security Assessment
 
-**Date:** January 6, 2026  
+**Date:** January 6, 2026 (Updated: January 8, 2026)  
 **Purpose:** Fast-track commands for complete Key Vault security workflow
+
+---
+
+## 📊 Report Quality (Updated 2026-01-08)
+
+All generated reports now include:
+- **Friendly Policy Names**: "Azure Key Vaults should use private link" instead of GUIDs
+- **Evaluation Explanations**: Clear notes explaining why 5 vaults = 15 evaluations
+- **Comprehensive Metadata**: All HTML/JSON/CSV reports include generation details
+
+See [COMPLIANCE_REPORT_ENHANCEMENT.md](COMPLIANCE_REPORT_ENHANCEMENT.md) for details.
 
 ---
 

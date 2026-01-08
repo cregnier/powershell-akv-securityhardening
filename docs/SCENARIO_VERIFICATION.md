@@ -1,7 +1,18 @@
 # Azure Key Vault Security Scenario - Complete Verification
 
-**Date:** January 6, 2026  
+**Date:** January 6, 2026 (Updated: January 8, 2026)  
 **Purpose:** Verify project deliverables cover complete Key Vault security assessment and remediation scenario
+
+---
+
+## Latest Enhancements (2026-01-08)
+
+All reports and scripts now include:
+- ✅ **Friendly Policy Names**: GUIDs mapped to readable names
+- ✅ **Evaluation Explanations**: Clear notes about why evaluation counts exceed vault counts
+- ✅ **Metadata Footers**: All reports include generation details (script, command, mode, timestamp, workflow ID)
+
+See [COMPLIANCE_REPORT_ENHANCEMENT.md](COMPLIANCE_REPORT_ENHANCEMENT.md) for details.
 
 ---
 

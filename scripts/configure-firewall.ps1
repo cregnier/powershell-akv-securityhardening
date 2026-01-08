@@ -1,7 +1,50 @@
 <#
-Configure Key Vault firewall rules or disable public network access
-Usage: .\configure-firewall.ps1 -SubscriptionId <id> -AllowedIpAddresses @('1.2.3.4') [-ResourceGroupName <rg>] [-WhatIf]
-Or use -UsePrivateEndpoint switch to generate guidance for creating private endpoints.
+.SYNOPSIS
+    Configures network access controls for Azure Key Vaults
+
+.DESCRIPTION
+    This script configures firewall rules and network access restrictions on Key Vaults.
+    Supports two modes:
+    1. Firewall IP allowlist mode: Specify allowed public IP addresses
+    2. Private endpoint mode: Provides guidance for creating private endpoints
+    
+    Network security controls:
+    - Restrict public network access to specific IP addresses
+    - Block all public access (requires private endpoint)
+    - Enable virtual network service endpoints
+    - Transition to private endpoint architecture
+    
+.PARAMETER SubscriptionId
+    The Azure subscription ID containing Key Vaults to configure
+
+.PARAMETER AllowedIpAddresses
+    Array of IP addresses or CIDR ranges to allow through the firewall (e.g., @('1.2.3.4', '10.0.0.0/24'))
+
+.PARAMETER UsePrivateEndpoint
+    Switch to receive guidance for creating private endpoints (instead of IP allowlist)
+
+.PARAMETER ResourceGroupName
+    Optional: Specific resource group to target. If omitted, applies to all vaults in subscription.
+
+.PARAMETER WhatIf
+    Shows what changes would be made without actually making them
+
+.EXAMPLE
+    .\configure-firewall.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb" -AllowedIpAddresses @('203.0.113.10')
+    Configures firewall to allow specific public IP address
+
+.EXAMPLE
+    .\configure-firewall.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb" -UsePrivateEndpoint
+    Provides guidance for setting up private endpoints
+
+.EXAMPLE
+    .\configure-firewall.ps1 -SubscriptionId "ab1336c7-687d-4107-b0f6-9649a0458adb" -AllowedIpAddresses @('10.0.0.0/24') -ResourceGroupName "rg-keyvaults" -WhatIf
+    Preview firewall changes for vaults in specific resource group
+
+.NOTES
+    Author: Azure Key Vault Security Framework
+    Generated from: Test-AzurePolicyKeyVault.ps1
+    ⚠️ WARNING: Configuring firewall may block existing applications. Test in non-production first.
 #>
 param(
     [Parameter(Mandatory=$true)] [string]$SubscriptionId,
